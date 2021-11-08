@@ -410,6 +410,7 @@ protected:
   static void StreamPlayingRestartDone(gpointer user_data);
 
 
+static gboolean SwitchSources(GstElement * video_switch);
 
 
 private:
@@ -446,7 +447,12 @@ private:
   GstElement *_textOverlay;
   GstElement *_h26xEnc;
   GstElement *_testSrcFilter;
-  GstElement *_h26xEncFilter;
+  GstElement *_testSyncIdentity;
+  GstElement *_camSyncIdentity;
+  GstElement *_segment;
+  GstElement *_inputSelector;
+  GstElement *_h26xCamCapsFilter;
+  GstElement *_h26xTestCapsFilter;
   GstElement *_h26xparse;
   GstElement *_h26xpay;
   GstElement *_udpSink;

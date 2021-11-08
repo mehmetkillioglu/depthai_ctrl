@@ -119,7 +119,7 @@ void DepthAIGStreamer::GrabVideoMsg(const CompressedImageMsg::SharedPtr video_ms
   RCLCPP_INFO(
     get_logger(),
     "RECEIVED CHUNK #" + std::to_string(stamp.sec) + "." + std::to_string(stamp.nanosec));
-  
+    
     g_mutex_lock(&_impl->haveDataCondMutex);
   _impl->queueMutex.lock();
   _impl->queue.push(video_msg);
