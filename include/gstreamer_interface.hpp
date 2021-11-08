@@ -453,10 +453,12 @@ private:
   GstElement *_inputSelector;
   GstElement *_h26xCamCapsFilter;
   GstElement *_h26xTestCapsFilter;
+  GstElement *_h26xTestparse;
   GstElement *_h26xparse;
   GstElement *_h26xpay;
   GstElement *_udpSink;
   GstElement *_queue1;
+  GstElement *_queue2;
   GstElement * _rtspSink;
   int _encoderWidth;
   int _encoderHeight;

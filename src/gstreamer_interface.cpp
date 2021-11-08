@@ -13,7 +13,7 @@ GstInterface::GstInterface(int argc, char * argv[])
   _h26xEnc(nullptr), _testSrcFilter(nullptr), _h26xCamCapsFilter(nullptr),
   _h26xparse(nullptr), _h26xpay(nullptr), _h26xTestCapsFilter(nullptr),
   _segment(nullptr), _testSyncIdentity(nullptr), _camSyncIdentity(nullptr),
-  _inputSelector(nullptr)
+  _inputSelector(nullptr), _h26xTestparse(nullptr), _queue2(nullptr)
 {
   _streamAddress = "";
   gst_init(&argc, &argv);
@@ -269,7 +269,7 @@ void GstInterface::BuildPipeline()
 
     // Video test source.
     _testSrc = gst_element_factory_make("videotestsrc", "videotestsrc");
-    g_object_set(G_OBJECT(_testSrc), "pattern", 2, NULL);
+    g_object_set(G_OBJECT(_testSrc), "pattern", 16, NULL);
     _testSrcFilter = gst_element_factory_make("capsfilter", "source_filter");
     g_object_set(
       G_OBJECT(_testSrcFilter), "caps",
@@ -341,6 +341,13 @@ void GstInterface::BuildPipeline()
     gst_util_set_object_arg(G_OBJECT(_appSource), "format", "GST_FORMAT_TIME");
     // H26x parser. Is this really needed?
     if (_encoderProfile == "H265") {
+      _h26xTestparse = gst_element_factory_make("h265parse", "test_parser");
+    } else {
+      _h26xTestparse = gst_element_factory_make("h264parse", "test_parser");
+    }
+    _queue2 = gst_element_factory_make("queue", "queue2");
+    
+    if (_encoderProfile == "H265") {
       _h26xparse = gst_element_factory_make("h265parse", "parser");
     } else {
       _h26xparse = gst_element_factory_make("h264parse", "parser");
@@ -402,9 +409,9 @@ void GstInterface::BuildPipeline()
     g_object_set(G_OBJECT(_segment), "single-segment", TRUE, NULL);
 
     _testSyncIdentity = gst_element_factory_make("identity", "test_src");
-    g_object_set(G_OBJECT(_testSyncIdentity), "sync", TRUE, NULL);
+    g_object_set(G_OBJECT(_testSyncIdentity), "sync", FALSE, NULL);
     _camSyncIdentity = gst_element_factory_make("identity", "cam_src");
-    g_object_set(G_OBJECT(_camSyncIdentity), "sync", TRUE, NULL);
+    g_object_set(G_OBJECT(_camSyncIdentity), "sync", FALSE, NULL);
     if (is_udp_protocol) {
       gst_bin_add_many(
         GST_BIN(
@@ -415,15 +422,17 @@ void GstInterface::BuildPipeline()
           _pipeline), _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xTestCapsFilter,
         _testSyncIdentity, _segment, _inputSelector, NULL);
 
+      gst_element_link(_appSource, _h26xCamCapsFilter);
+      gst_element_link(_h26xCamCapsFilter, _camSyncIdentity);
+      gst_element_link(_camSyncIdentity, _inputSelector);
+
       gst_element_link(_testSrc, _testSrcFilter);
       gst_element_link(_testSrcFilter, _textOverlay);
       gst_element_link(_textOverlay, _h26xEnc);
       gst_element_link(_h26xEnc, _h26xTestCapsFilter);
       gst_element_link(_h26xTestCapsFilter, _testSyncIdentity);
       gst_element_link(_testSyncIdentity, _inputSelector);
-      gst_element_link(_appSource, _h26xCamCapsFilter);
-      gst_element_link(_h26xCamCapsFilter, _camSyncIdentity);
-      gst_element_link(_camSyncIdentity, _inputSelector);
+
       gst_element_link(_inputSelector, _segment);
       gst_element_link(_segment, _h26xparse);
       gst_element_link(_h26xparse, _queue1);
@@ -437,16 +446,18 @@ void GstInterface::BuildPipeline()
         _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xTestCapsFilter,
         _testSyncIdentity, _segment, _inputSelector, NULL);
 
+      
+      gst_element_link(_appSource, _h26xCamCapsFilter);
+      gst_element_link(_h26xCamCapsFilter, _camSyncIdentity);
+      gst_element_link(_camSyncIdentity, _inputSelector);
+
       gst_element_link(_testSrc, _testSrcFilter);
       gst_element_link(_testSrcFilter, _textOverlay);
       gst_element_link(_textOverlay, _h26xEnc);
       gst_element_link(_h26xEnc, _h26xTestCapsFilter);
       gst_element_link(_h26xTestCapsFilter, _testSyncIdentity);
       gst_element_link(_testSyncIdentity, _inputSelector);
-      
-      gst_element_link(_appSource, _h26xCamCapsFilter);
-      gst_element_link(_h26xCamCapsFilter, _camSyncIdentity);
-      gst_element_link(_camSyncIdentity, _inputSelector);
+
       gst_element_link(_inputSelector, _segment);
       gst_element_link(_segment, _h26xparse);
       gst_element_link(_h26xparse, _queue1);
@@ -455,7 +466,7 @@ void GstInterface::BuildPipeline()
 
     gst_debug_bin_to_dot_file(GST_BIN(_pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline_begin");
 
-    g_timeout_add (20000, (GSourceFunc) GstInterface::SwitchSources, _inputSelector);
+    //g_timeout_add (20000, (GSourceFunc) GstInterface::SwitchSources, _inputSelector);
   }
 
   _bus = gst_pipeline_get_bus(GST_PIPELINE(_pipeline));
@@ -488,11 +499,22 @@ std::this_thread::sleep_for(std::chrono::milliseconds(10));
     //g_usleep(10000000); // 10ms
   }*/
   //std::cout << "Need data called!" << std::endl;
+
+  gint64 end_time;  
+  end_time = g_get_monotonic_time () + 2 * G_TIME_SPAN_SECOND;
   if (!data->_isStreamDefault) {
     g_mutex_lock(&data->haveDataCondMutex);
     while (data->queue.empty()) {
       //std::cout << "Queue is empty!" << std::endl;
-      g_cond_wait(&data->haveDataCond, &data->haveDataCondMutex);
+
+      if (!g_cond_wait_until (&data->haveDataCond, &data->haveDataCondMutex, end_time)){
+            
+        std::cout << "Timeout passed. Switching to default stream!" << std::endl;
+        GstInterface::SwitchSources(data->_inputSelector);
+        g_mutex_unlock (&data->haveDataCondMutex);
+        return;
+      }
+      //g_cond_wait(&data->haveDataCond, &data->haveDataCondMutex);
     }
     auto videoPtr = data->queue.front();
     data->queueMutex.lock();
