@@ -6,13 +6,14 @@ namespace depthai_ctrl
 GstInterface::GstInterface(int argc, char * argv[])
 : _pipeline(nullptr), _appSource(nullptr), _busWatchId(0), _bus(nullptr),
   _needDataSignalId(0), _isStreamStarting(false), _isStreamPlaying(false),
-  _isStreamDefault(false), _isStreamShutdown(false), _mLoopContext(nullptr), 
-  _mLoopThread(nullptr), _mLoop(nullptr), _encoderProfile("H264"),
-  _testSrc(nullptr), _textOverlay(nullptr), _h26xEnc(nullptr), _testSrcFilter(nullptr),
-  _h26xEncFilter(nullptr), _h26xparse(nullptr), _h26xpay(nullptr),_udpSink(nullptr),
+  _isStreamDefault(false), _isStreamShutdown(false), _isErrorDetected(false),
+  _mLoopContext(nullptr), _mCreatePipelineThread(nullptr), _mLoopThread(nullptr),
+  _mLoop(nullptr), _encoderProfile("H264"), _streamAddress(""), _testSrc(nullptr),
+  _textOverlay(nullptr), _h26xEnc(nullptr), _testSrcFilter(nullptr), _h26xEncFilter(nullptr),
+  _h26xparse(nullptr), _h26xpay(nullptr), _udpSink(nullptr), _videoConvert(nullptr),
   _queue1(nullptr), _rtspSink(nullptr), _gstStartTimestamp(0), _gstTimestamp(0),
   _encoderWidth(1280), _encoderHeight(720), _encoderFps(25), _encoderBitrate(3000000)
-
+  
 //: _mLoopContext(nullptr), _mLoopThread(nullptr), _pipeline(nullptr),
 //  _mLoop(nullptr), _appSource(nullptr), _encoderProfile("H264"),
 //  _busWatchId(0), _bus(nullptr), _needDataSignalId(0),
@@ -24,9 +25,10 @@ GstInterface::GstInterface(int argc, char * argv[])
 //  _isStreamShutdown(false), _isStreamStarting(false), _gstStartTimestamp(0),
 //  _gstTimestamp(0)
 {
-  _streamAddress = "";
   gst_init(&argc, &argv);
   g_mutex_init(&haveDataCondMutex);
+  _mLoopContext = g_main_context_default();
+  _mLoop = g_main_loop_new(_mLoopContext, false);
 }
 
 GstInterface::~GstInterface()
@@ -42,9 +44,10 @@ void GstInterface::StartStream(void)
   _isStreamShutdown = false;
   _isStreamStarting = true;
   _gstTimestamp = 0;
-
-  _mLoopContext = g_main_context_default();
-  _mLoop = g_main_loop_new(_mLoopContext, false);
+  if (_isErrorDetected) {
+    _mLoopContext = g_main_context_default();
+    _mLoop = g_main_loop_new(_mLoopContext, false);
+  }
   std::cout << "Start stream called!" << std::endl;
   _mCreatePipelineThread = g_thread_new(
     "GstThreadCreatePipeline",
@@ -100,9 +103,11 @@ void GstInterface::StopStream(void)
     g_thread_join(_mLoopThread);
 
   }
+  std::cout << "Quitting create pipeline thread!" << std::endl;
   if (_mCreatePipelineThread != nullptr) {
     g_thread_join(_mCreatePipelineThread);
   }
+  std::cout << "Unreferencing main context!" << std::endl;
   if (_mLoopContext) {
     g_main_context_unref(_mLoopContext);
   }
@@ -110,13 +115,15 @@ void GstInterface::StopStream(void)
 
 void GstInterface::BuildDefaultPipeline()
 {
+  std::cout << "Building default pipeline!" << std::endl;
   _isStreamDefault = true;
+  const std::string gstFormat = (_encoderProfile == "H264") ? "video/x-h264" : "video/x-h265";
   const bool is_udp_protocol = (_streamAddress.find("udp://") == 0);
   _pipeline = gst_pipeline_new("default_pipeline");
 
   // Video test source.
   _testSrc = gst_element_factory_make("videotestsrc", "source");
-  g_object_set(G_OBJECT(_testSrc), "pattern", 16, NULL);
+  g_object_set(G_OBJECT(_testSrc), "pattern", 18, NULL);
   _testSrcFilter = gst_element_factory_make("capsfilter", "source_filter");
   g_object_set(
     G_OBJECT(_testSrcFilter), "caps",
@@ -140,19 +147,22 @@ void GstInterface::BuildDefaultPipeline()
 
   // Software encoder and parser.
   if (_encoderProfile == "H265") {
-    _h26xEnc = gst_element_factory_make("x265enc", "encoder");
+    
+    _videoConvert = gst_element_factory_make("videoconvert", "video_convert");
+    _h26xEnc = gst_element_factory_make("x265enc", "encoder");/*
     g_object_set(
       G_OBJECT(_h26xEnc),
       "bitrate", 500,               // 500 kbit/sec
       "speed-preset", 2,               // 2 = superfast
       "tune", 4,               // 4 = zero latency 5 = fast decode
-      NULL);
+      NULL);*/
     _h26xparse = gst_element_factory_make("h265parse", "parser");
   } else {
     _h26xEnc = gst_element_factory_make("x264enc", "encoder");
     _h26xparse = gst_element_factory_make("h264parse", "parser");
   }
 
+    _queue1 = gst_element_factory_make("queue", "queue1");
   // Sink element. UDP or RTSP client.
   if (is_udp_protocol) {
     // UDP Sink
@@ -181,12 +191,12 @@ void GstInterface::BuildDefaultPipeline()
   }
 
   // Caps definition for source element.
-  std::string profile = _encoderProfile;
+  /*std::string profile = _encoderProfile;
   std::stringstream ss;
   std::string gstFormat;
   std::transform(profile.begin(), profile.end(), profile.begin(), ::tolower);
   ss << "video/x-" << profile;
-  ss >> gstFormat;
+  ss >> gstFormat;*/
   _h26xEncFilter = gst_element_factory_make("capsfilter", "encoder_filter");
   g_object_set(
     G_OBJECT(_h26xEncFilter), "caps",
@@ -201,24 +211,66 @@ void GstInterface::BuildDefaultPipeline()
       "subme", G_TYPE_INT, 1,
       "bitrate", G_TYPE_INT, 4000,
       NULL), NULL);
-  g_assert(_pipeline);
-
-  if (is_udp_protocol) {
-    gst_bin_add_many(
-      GST_BIN(
-        _pipeline), _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter, _h26xparse, _h26xpay, _udpSink,
-      NULL);
-    gst_element_link_many(
-      _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter,
-      _h26xparse, _h26xpay, _udpSink, NULL);
+  //g_assert(_pipeline);
+  /*if (_encoderProfile == "H265") {
+    gst_bin_add_many(GST_BIN(_pipeline), _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, _h26xparse, _h26xEncFilter, _h26xpay, _udpSink, NULL);
+    gst_element_link_many(_testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, _h26xparse, _h26xEncFilter, _h26xpay, _udpSink, NULL);
   } else {
+    gst_bin_add_many(GST_BIN(_pipeline), _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xparse, _h26xEncFilter, _h26xpay, _udpSink, NULL);
+    gst_element_link_many(_testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xparse, _h26xEncFilter, _h26xpay, _udpSink, NULL);
+  }*/
+  if (is_udp_protocol) {
+    if (_encoderProfile == "H265") {
+      gst_bin_add_many(
+        GST_BIN(
+          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc,  _h26xparse, _h26xpay, _udpSink,
+        NULL);
+      gst_element_link_many(
+        _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, 
+        _h26xparse, _h26xpay, _udpSink, NULL);
+    } else {
+      gst_bin_add_many(
+        GST_BIN(
+          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter, _h26xparse, _h26xpay, _udpSink,
+        NULL);
+      gst_element_link_many(
+        _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter,
+        _h26xparse, _h26xpay, _udpSink, NULL);
+    }
+    /*
+      gst_bin_add_many(
+        GST_BIN(
+          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter, _h26xparse, _h26xpay, _udpSink,
+        NULL);
+      gst_element_link_many(
+        _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter,
+        _h26xparse, _h26xpay, _udpSink, NULL);*/
+  } else {
+    if (_encoderProfile == "H265") {
+      gst_bin_add_many(
+        GST_BIN(
+          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc,  _h26xparse, _rtspSink,
+        NULL);
+      gst_element_link_many(
+        _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, 
+        _h26xparse, _rtspSink, NULL);
+    } else {
+      gst_bin_add_many(
+        GST_BIN(
+          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter, _h26xparse, _rtspSink,
+        NULL);
+      gst_element_link_many(
+        _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter,
+        _h26xparse, _rtspSink, NULL);
+    }
+/*
     gst_bin_add_many(
       GST_BIN(
         _pipeline), _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter, _h26xparse, _rtspSink,
       NULL);
     gst_element_link_many(
       _testSrc, _testSrcFilter, _textOverlay, _h26xEnc, _h26xEncFilter,
-      _h26xparse, _rtspSink, NULL);
+      _h26xparse, _rtspSink, NULL);*/
   }
 
   //GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(_pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline_test");
@@ -234,6 +286,7 @@ void GstInterface::BuildPipeline()
   if (_isStreamDefault) {     // video-data is not available - use "default" video output
     BuildDefaultPipeline();
   } else {
+    std::cout << "Building camera streaming pipeline!" << std::endl;
 
     _pipeline = gst_pipeline_new("rgbCamSink_pipeline");
     // Source element.
@@ -276,18 +329,20 @@ void GstInterface::BuildPipeline()
         G_OBJECT(_rtspSink),
         "protocols", 4,             // 4 = tcp
         "tls-validation-flags", 0,
+        "latency", 500,
+        "rtx-time", 0,
         //"tcp-timeout", 15000000,
         "location", _streamAddress.c_str(),
         NULL);
     }
 
     // Caps definition for source element.
-    std::string profile = _encoderProfile;
+    /*std::string profile = _encoderProfile;
     std::stringstream ss;
     std::string gstFormat;
     std::transform(profile.begin(), profile.end(), profile.begin(), ::tolower);
     ss << "video/x-" << profile;
-    ss >> gstFormat;
+    ss >> gstFormat;*/
     g_object_set(
       G_OBJECT(_appSource), "caps",
       gst_caps_new_simple(
