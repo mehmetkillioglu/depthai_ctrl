@@ -13,7 +13,6 @@ GstInterface::GstInterface(int argc, char * argv[])
   _h26xparse(nullptr), _h26xpay(nullptr), _udpSink(nullptr), _videoConvert(nullptr),
   _queue1(nullptr), _rtspSink(nullptr), _gstStartTimestamp(0), _gstTimestamp(0),
   _encoderWidth(1280), _encoderHeight(720), _encoderFps(25), _encoderBitrate(3000000)
-  
 //: _mLoopContext(nullptr), _mLoopThread(nullptr), _pipeline(nullptr),
 //  _mLoop(nullptr), _appSource(nullptr), _encoderProfile("H264"),
 //  _busWatchId(0), _bus(nullptr), _needDataSignalId(0),
@@ -44,10 +43,19 @@ void GstInterface::StartStream(void)
   _isStreamShutdown = false;
   _isStreamStarting = true;
   _gstTimestamp = 0;
-  if (_isErrorDetected) {
-    _mLoopContext = g_main_context_default();
-    _mLoop = g_main_loop_new(_mLoopContext, false);
+  _gstStartTimestamp = 0;
+  std::cout << "Quitting main gst loop!" << std::endl;
+  if (_mLoop != nullptr) {
+    g_main_loop_quit(_mLoop);
+    _mLoop = nullptr;
   }
+  std::cout << "Unreferencing main context!" << std::endl;
+  if (_mLoopContext != nullptr) {
+    g_main_context_unref(_mLoopContext);
+    _mLoopContext = nullptr;
+  }
+  _mLoopContext = g_main_context_default();
+  _mLoop = g_main_loop_new(_mLoopContext, false);
   std::cout << "Start stream called!" << std::endl;
   _mCreatePipelineThread = g_thread_new(
     "GstThreadCreatePipeline",
@@ -110,6 +118,7 @@ void GstInterface::StopStream(void)
   std::cout << "Unreferencing main context!" << std::endl;
   if (_mLoopContext) {
     g_main_context_unref(_mLoopContext);
+    _mLoopContext = nullptr;
   }
 }
 
@@ -147,7 +156,7 @@ void GstInterface::BuildDefaultPipeline()
 
   // Software encoder and parser.
   if (_encoderProfile == "H265") {
-    
+
     _videoConvert = gst_element_factory_make("videoconvert", "video_convert");
     _h26xEnc = gst_element_factory_make("x265enc", "encoder");/*
     g_object_set(
@@ -162,7 +171,7 @@ void GstInterface::BuildDefaultPipeline()
     _h26xparse = gst_element_factory_make("h264parse", "parser");
   }
 
-    _queue1 = gst_element_factory_make("queue", "queue1");
+  _queue1 = gst_element_factory_make("queue", "queue1");
   // Sink element. UDP or RTSP client.
   if (is_udp_protocol) {
     // UDP Sink
@@ -223,10 +232,10 @@ void GstInterface::BuildDefaultPipeline()
     if (_encoderProfile == "H265") {
       gst_bin_add_many(
         GST_BIN(
-          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc,  _h26xparse, _h26xpay, _udpSink,
+          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, _h26xparse, _h26xpay, _udpSink,
         NULL);
       gst_element_link_many(
-        _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, 
+        _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc,
         _h26xparse, _h26xpay, _udpSink, NULL);
     } else {
       gst_bin_add_many(
@@ -249,10 +258,10 @@ void GstInterface::BuildDefaultPipeline()
     if (_encoderProfile == "H265") {
       gst_bin_add_many(
         GST_BIN(
-          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc,  _h26xparse, _rtspSink,
+          _pipeline), _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, _h26xparse, _rtspSink,
         NULL);
       gst_element_link_many(
-        _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc, 
+        _testSrc, _testSrcFilter, _textOverlay, _videoConvert, _h26xEnc,
         _h26xparse, _rtspSink, NULL);
     } else {
       gst_bin_add_many(
@@ -445,7 +454,7 @@ void * GstInterface::CreatePipeline(gpointer data)
   GstInterface * gst = (GstInterface *)data;
 
   gint64 end_time;
-  end_time = g_get_monotonic_time() + 2 * G_TIME_SPAN_SECOND;
+  end_time = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
   g_mutex_lock(&gst->haveDataCondMutex);
   while (gst->queue.empty()) {
     if (!g_cond_wait_until(&gst->haveDataCond, &gst->haveDataCondMutex, end_time)) {

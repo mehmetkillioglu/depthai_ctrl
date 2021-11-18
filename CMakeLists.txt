@@ -113,7 +113,8 @@ install(TARGETS depthai_camera depthai_gstreamer gstreamer_interface
         RUNTIME DESTINATION bin)
 
 install(TARGETS
-        camera_node gstreamer_node depthai_ctrl)
+        camera_node gstreamer_node depthai_ctrl
+        DESTINATION lib/${PROJECT_NAME})
 
 
 install(DIRECTORY launch params
