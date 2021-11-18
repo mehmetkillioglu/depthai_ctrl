@@ -26,8 +26,8 @@ GstInterface::GstInterface(int argc, char * argv[])
 {
   gst_init(&argc, &argv);
   g_mutex_init(&haveDataCondMutex);
-  _mLoopContext = g_main_context_default();
-  _mLoop = g_main_loop_new(_mLoopContext, false);
+  //_mLoopContext = g_main_context_default();
+  //_mLoop = g_main_loop_new(_mLoopContext, false);
 }
 
 GstInterface::~GstInterface()
@@ -44,12 +44,12 @@ void GstInterface::StartStream(void)
   _isStreamStarting = true;
   _gstTimestamp = 0;
   _gstStartTimestamp = 0;
-  std::cout << "Quitting main gst loop!" << std::endl;
+  //std::cout << "Quitting main gst loop!" << std::endl;
   if (_mLoop != nullptr) {
     g_main_loop_quit(_mLoop);
     _mLoop = nullptr;
   }
-  std::cout << "Unreferencing main context!" << std::endl;
+  //std::cout << "Unreferencing main context!" << std::endl;
   if (_mLoopContext != nullptr) {
     g_main_context_unref(_mLoopContext);
     _mLoopContext = nullptr;
@@ -116,7 +116,7 @@ void GstInterface::StopStream(void)
     g_thread_join(_mCreatePipelineThread);
   }
   std::cout << "Unreferencing main context!" << std::endl;
-  if (_mLoopContext) {
+  if (_mLoopContext != nullptr) {
     g_main_context_unref(_mLoopContext);
     _mLoopContext = nullptr;
   }
@@ -454,7 +454,7 @@ void * GstInterface::CreatePipeline(gpointer data)
   GstInterface * gst = (GstInterface *)data;
 
   gint64 end_time;
-  end_time = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
+  end_time = g_get_monotonic_time() + 2 * G_TIME_SPAN_SECOND;
   g_mutex_lock(&gst->haveDataCondMutex);
   while (gst->queue.empty()) {
     if (!g_cond_wait_until(&gst->haveDataCond, &gst->haveDataCondMutex, end_time)) {
