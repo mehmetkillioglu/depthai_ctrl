@@ -67,6 +67,7 @@ void GstInterface::StopStream(void)
   _isStreamShutdown = true;
   _isStreamStarting = false;
   _isStreamPlaying = false;
+  _isStreamDefault = false;
   std::cout << "Broadcasting the GCond signal to unlock have-data!" << std::endl;
   g_cond_broadcast(&haveDataCond);
   std::cout << "Sending end-of-stream!" << std::endl;
@@ -89,7 +90,10 @@ void GstInterface::StopStream(void)
     gst_element_set_state(_pipeline, GST_STATE_NULL);
     std::cout << "Unreferencing pipeline element!" << std::endl;
     gst_object_unref(GST_OBJECT(_pipeline));
+    gst_object_unref(GST_OBJECT(_appSource));
     _pipeline = nullptr;
+    _appSource = nullptr;
+    
   }
   std::cout << "Unreferencing bus element!" << std::endl;
   if (_bus != nullptr) {
@@ -461,6 +465,11 @@ void * GstInterface::CreatePipeline(gpointer data)
       std::cout << "Queue is empty after timeout! Building default pipeline." << std::endl;
       gst->_isStreamDefault = true;
       break;
+    }else {
+      std::cout << "Queue is not empty after timeout! Building camera streaming pipeline." << std::endl;
+      gst->_isStreamDefault = false;
+      break;
+
     }
   }
   g_mutex_unlock(&gst->haveDataCondMutex);
