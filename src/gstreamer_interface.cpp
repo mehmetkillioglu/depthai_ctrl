@@ -90,7 +90,7 @@ void GstInterface::StopStream(void)
     gst_element_set_state(_pipeline, GST_STATE_NULL);
     std::cout << "Unreferencing pipeline element!" << std::endl;
     gst_object_unref(GST_OBJECT(_pipeline));
-    gst_object_unref(GST_OBJECT(_appSource));
+    //gst_object_unref(GST_OBJECT(_appSource));
     _pipeline = nullptr;
     _appSource = nullptr;
     
