@@ -1,3 +1,6 @@
 [submodule "depthai-core"]
 	path = depthai-core
-	url = https://github.com/tiiuae/depthai_core.git
+	url = git@github.com:mehmetkillioglu/depthai-core.git
+[submodule "depthai_core"]
+	path = depthai_core
+	url = git@github.com:mehmetkillioglu/depthai-core.git

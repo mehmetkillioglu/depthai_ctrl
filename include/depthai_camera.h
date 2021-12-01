@@ -2,6 +2,8 @@
 #define FOG_SW_DEPTHAI_CAMERA_H
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+// Includes common necessary includes for development using depthai library
+#include "depthai/depthai.hpp"
 #include <depthai/device/Device.hpp>
 #include <depthai/pipeline/datatype/ImgFrame.hpp>
 #include <depthai/pipeline/node/ColorCamera.hpp>
@@ -39,6 +41,7 @@ public:
     _videoH265(false),
     _useMonoCams(false),
     _useRawColorCam(false),
+    _useVideoStream(true),
     _useUSB3(false),
     _thread_running(false),
     _left_camera_frame("left_camera_frame"),
@@ -120,6 +123,7 @@ private:
   bool _videoH265;
   bool _useMonoCams;
   bool _useRawColorCam;
+  bool _useVideoStream;
   bool _useUSB3;
   rclcpp::Time _lastFrameTime;
   long int _lastFrameTimePoint;

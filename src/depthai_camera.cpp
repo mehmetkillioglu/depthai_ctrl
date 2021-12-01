@@ -45,6 +45,7 @@ void DepthAICamera::Initialize()
   declare_parameter<int>("bitrate", 3000000);
   declare_parameter<bool>("use_mono_cams", false);
   declare_parameter<bool>("use_raw_color_cam", false);
+  declare_parameter<bool>("use_video_stream", true);
   declare_parameter<bool>("use_usb_three", false);
 
   _videoWidth = get_parameter("width").as_int();
@@ -54,6 +55,7 @@ void DepthAICamera::Initialize()
   _videoH265 = (get_parameter("encoding").as_string() == "H265");
   _useMonoCams = get_parameter("use_mono_cams").as_bool();
   _useRawColorCam = get_parameter("use_raw_color_cam").as_bool();
+  _useVideoStream = get_parameter("use_video_stream").as_bool();
 
   // USB2 can only handle one H264 stream from camera. Adding raw camera or mono cameras will
   // cause dropped messages and unstable latencies between frames. When using USB3, we can
@@ -134,6 +136,7 @@ void DepthAICamera::TryRestarting()
   RCLCPP_INFO(this->get_logger(), "[%s]: (Re)Starting...", get_name());
 
   _pipeline = std::make_shared<dai::Pipeline>();
+  //dai::Pipeline _pipeline;
 
   // Using mono cameras adds additional CPU consumption, therefore it is disabled by default
   if (_useMonoCams) {
@@ -142,28 +145,41 @@ void DepthAICamera::TryRestarting()
     auto xoutLeft = _pipeline->create<dai::node::XLinkOut>();
     auto xoutRight = _pipeline->create<dai::node::XLinkOut>();
     // Setup Grayscale Cameras
-    monoLeft->setResolution(dai::MonoCameraProperties::SensorResolution::THE_720_P);
+    monoLeft->setResolution(dai::MonoCameraProperties::SensorResolution::THE_400_P);
     monoLeft->setBoardSocket(dai::CameraBoardSocket::LEFT);
-    monoRight->setResolution(dai::MonoCameraProperties::SensorResolution::THE_720_P);
+    monoLeft->setFps(_videoFps);
+    monoRight->setResolution(dai::MonoCameraProperties::SensorResolution::THE_400_P);
     monoRight->setBoardSocket(dai::CameraBoardSocket::RIGHT);
+    monoRight->setFps(_videoFps);
     monoLeft->out.link(xoutLeft->input);
     monoRight->out.link(xoutRight->input);
     xoutLeft->setStreamName("left");
     xoutRight->setStreamName("right");
   }
-  auto colorCamera = _pipeline->create<dai::node::ColorCamera>();
-  auto videoEncoder = _pipeline->create<dai::node::VideoEncoder>();
+  std::shared_ptr<dai::node::ColorCamera> colorCamera;
+  std::shared_ptr<dai::node::VideoEncoder> videoEncoder;
 
-  auto xoutVideo = _pipeline->create<dai::node::XLinkOut>();
-  xoutVideo->setStreamName("enc26xColor");
-  // Setup Color Camera
-  colorCamera->setBoardSocket(dai::CameraBoardSocket::RGB);
-  colorCamera->setResolution(dai::ColorCameraProperties::SensorResolution::THE_1080_P);
+  std::shared_ptr<dai::node::XLinkOut> xoutVideo;
+  if (_useRawColorCam || _useVideoStream){
+    colorCamera = _pipeline->create<dai::node::ColorCamera>();
+    videoEncoder = _pipeline->create<dai::node::VideoEncoder>();
+    xoutVideo = _pipeline->create<dai::node::XLinkOut>();
 
-  // Preview resolution cannot be larger than Video's, thus resolution color camera image is limited
-  colorCamera->setPreviewSize(_videoWidth, _videoHeight);
-  colorCamera->setVideoSize(_videoWidth, _videoHeight);
-  colorCamera->setFps(_videoFps);
+    xoutVideo->setStreamName("enc26xColor");
+    // Setup Color Camera
+    colorCamera->setBoardSocket(dai::CameraBoardSocket::RGB);
+    colorCamera->setResolution(dai::ColorCameraProperties::SensorResolution::THE_1080_P);
+
+    // Preview resolution cannot be larger than Video's, thus resolution color camera image is limited
+    colorCamera->setPreviewSize(_videoWidth, _videoHeight);
+    colorCamera->setVideoSize(_videoWidth, _videoHeight);
+    colorCamera->setFps(_videoFps);
+
+    auto xinColor = _pipeline->create<dai::node::XLinkIn>();
+    xinColor->setStreamName("colorCamCtrl");
+
+    xinColor->out.link(colorCamera->inputControl);
+  }
 
   // Like mono cameras, color camera is disabled by default to reduce computational load.
   if (_useRawColorCam) {
@@ -171,24 +187,26 @@ void DepthAICamera::TryRestarting()
     xoutColor->setStreamName("color");
     colorCamera->preview.link(xoutColor->input);
   }
+  if (_useVideoStream){
+    Profile encoding = _videoH265 ? Profile::H265_MAIN : Profile::H264_MAIN;
+    videoEncoder->setDefaultProfilePreset(_videoWidth, _videoHeight, _videoFps, encoding);
+    videoEncoder->setBitrate(_videoBitrate);
+    RCLCPP_INFO(
+      this->get_logger(), "[%s]: VideoEncoder FPS: %f",
+      get_name(), videoEncoder->getFrameRate());
 
-  Profile encoding = _videoH265 ? Profile::H265_MAIN : Profile::H264_MAIN;
-  videoEncoder->setDefaultProfilePreset(_videoWidth, _videoHeight, _videoFps, encoding);
-  videoEncoder->setBitrate(_videoBitrate);
-  RCLCPP_INFO(
-    this->get_logger(), "[%s]: VideoEncoder FPS: %f",
-    get_name(), videoEncoder->getFrameRate());
+    colorCamera->video.link(videoEncoder->input);
+    videoEncoder->bitstream.link(xoutVideo->input);
 
-  colorCamera->video.link(videoEncoder->input);
-  videoEncoder->bitstream.link(xoutVideo->input);
-  auto xinColor = _pipeline->create<dai::node::XLinkIn>();
-  xinColor->setStreamName("colorCamCtrl");
-
-  xinColor->out.link(colorCamera->inputControl);
+  }
   RCLCPP_INFO(this->get_logger(), "[%s]: Initializing DepthAI camera...", get_name());
   for (int i = 0; i < 5 && !_device; i++) {
     try {
-      _device = std::make_shared<dai::Device>(*_pipeline, !_useUSB3);
+      if (!_useUSB3){
+        _device = std::make_shared<dai::Device>(*_pipeline, dai::UsbSpeed::HIGH);
+      } else {
+        _device = std::make_shared<dai::Device>(*_pipeline, dai::UsbSpeed::SUPER_PLUS);
+      }
     } catch (const std::runtime_error & err) {
       RCLCPP_ERROR(get_logger(), "Cannot start DepthAI camera: %s", err.what());
       _device.reset();
@@ -227,11 +245,13 @@ void DepthAICamera::TryRestarting()
     usbSpeed.c_str());
 
   //_device->startPipeline();
-  _colorCamInputQueue = _device->getInputQueue("colorCamCtrl");
-  dai::CameraControl colorCamCtrl;
-  colorCamCtrl.setAutoFocusMode(dai::RawCameraControl::AutoFocusMode::CONTINUOUS_VIDEO);
+  if (_useRawColorCam || _useVideoStream) {
+    _colorCamInputQueue = _device->getInputQueue("colorCamCtrl");
+    dai::CameraControl colorCamCtrl;
+    colorCamCtrl.setAutoFocusMode(dai::RawCameraControl::AutoFocusMode::CONTINUOUS_VIDEO);
 
-  _colorCamInputQueue->send(colorCamCtrl);
+    _colorCamInputQueue->send(colorCamCtrl);
+  }
 
   if (_useRawColorCam) {
     _colorQueue = _device->getOutputQueue("color", 30, false);
@@ -241,7 +261,6 @@ void DepthAICamera::TryRestarting()
         &DepthAICamera::onColorCamCallback, this,
         std::placeholders::_1));
   }
-  _videoQueue = _device->getOutputQueue("enc26xColor", 30, true);
   if (_useMonoCams) {
     _leftQueue = _device->getOutputQueue("left", 30, false);
     _rightQueue = _device->getOutputQueue("right", 30, false);
@@ -258,12 +277,14 @@ void DepthAICamera::TryRestarting()
         std::placeholders::_1));
   }
   _thread_running = true;
-
-  _videoEncoderCallback =
-    _videoQueue->addCallback(
-    std::bind(
-      &DepthAICamera::onVideoEncoderCallback, this,
-      std::placeholders::_1));
+  if (_useVideoStream) {
+    _videoQueue = _device->getOutputQueue("enc26xColor", 30, true);
+    _videoEncoderCallback =
+      _videoQueue->addCallback(
+      std::bind(
+        &DepthAICamera::onVideoEncoderCallback, this,
+        std::placeholders::_1));
+  }
 
 }
 
