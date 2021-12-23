@@ -12,15 +12,18 @@ using std::chrono::duration_cast;
 using std::chrono::nanoseconds;
 using std::chrono::seconds;
 static const std::vector<std::string> labelMap = {
-    "person",        "bicycle",      "car",           "motorbike",     "aeroplane",   "bus",         "train",       "truck",        "boat",
-    "traffic light", "fire hydrant", "stop sign",     "parking meter", "bench",       "bird",        "cat",         "dog",          "horse",
-    "sheep",         "cow",          "elephant",      "bear",          "zebra",       "giraffe",     "backpack",    "umbrella",     "handbag",
-    "tie",           "suitcase",     "frisbee",       "skis",          "snowboard",   "sports ball", "kite",        "baseball bat", "baseball glove",
-    "skateboard",    "surfboard",    "tennis racket", "bottle",        "wine glass",  "cup",         "fork",        "knife",        "spoon",
-    "bowl",          "banana",       "apple",         "sandwich",      "orange",      "broccoli",    "carrot",      "hot dog",      "pizza",
-    "donut",         "cake",         "chair",         "sofa",          "pottedplant", "bed",         "diningtable", "toilet",       "tvmonitor",
-    "laptop",        "mouse",        "remote",        "keyboard",      "cell phone",  "microwave",   "oven",        "toaster",      "sink",
-    "refrigerator",  "book",         "clock",         "vase",          "scissors",    "teddy bear",  "hair drier",  "toothbrush"};
+  "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
+  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+  "horse",
+  "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+  "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+  "baseball glove",
+  "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife",
+  "spoon",
+  "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza",
+  "donut", "cake", "chair", "sofa", "pottedplant", "bed", "diningtable", "toilet", "tvmonitor",
+  "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+  "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"};
 
 void DepthAICamera::Initialize()
 {
@@ -29,20 +32,26 @@ void DepthAICamera::Initialize()
   declare_parameter<std::string>("right_camera_topic", "camera/right/image_raw");
   declare_parameter<std::string>("color_camera_topic", "camera/color/image_raw");
   declare_parameter<std::string>("video_stream_topic", "camera/color/video");
+  declare_parameter<std::string>("passthrough_topic", "camera/color/image_passthrough");
   declare_parameter<std::string>("stream_control_topic", "videostreamcmd");
+  declare_parameter<std::string>("goal_pose_topic", "goal_pose");
   declare_parameter<std::string>("nn_directory", "tiny-yolo-v4_openvino_2021.2_6shave.blob");
-  
+
 
   const std::string left_camera_topic = get_parameter("left_camera_topic").as_string();
   const std::string right_camera_topic = get_parameter("right_camera_topic").as_string();
   const std::string color_camera_topic = get_parameter("color_camera_topic").as_string();
   const std::string video_stream_topic = get_parameter("video_stream_topic").as_string();
+  const std::string passthrough_topic = get_parameter("passthrough_topic").as_string();
+  const std::string goal_pose_topic = get_parameter("goal_pose_topic").as_string();
   const std::string stream_control_topic = get_parameter("stream_control_topic").as_string();
   _nn_directory = get_parameter("nn_directory").as_string();
 
   _left_publisher = create_publisher<ImageMsg>(left_camera_topic, rclcpp::SensorDataQoS());
   _right_publisher = create_publisher<ImageMsg>(right_camera_topic, rclcpp::SensorDataQoS());
   _color_publisher = create_publisher<ImageMsg>(color_camera_topic, rclcpp::SensorDataQoS());
+  _passthrough_publisher = create_publisher<ImageMsg>(passthrough_topic, rclcpp::SensorDataQoS());
+  _goal_pose_publisher = create_publisher<geometry_msgs::msg::Vector3Stamped>(goal_pose_topic, 1);
   _video_publisher = create_publisher<CompressedImageMsg>(
     video_stream_topic,
     rclcpp::SystemDefaultsQoS());
@@ -63,6 +72,7 @@ void DepthAICamera::Initialize()
   declare_parameter<bool>("use_auto_focus", false);
   declare_parameter<bool>("use_usb_three", false);
   declare_parameter<bool>("use_neural_network", false);
+  declare_parameter<bool>("use_passthrough_preview", false);
 
   _videoWidth = get_parameter("width").as_int();
   _videoHeight = get_parameter("height").as_int();
@@ -75,8 +85,11 @@ void DepthAICamera::Initialize()
   _useVideoFromColorCam = get_parameter("use_video_from_color_cam").as_bool();
   _useAutoFocus = get_parameter("use_auto_focus").as_bool();
   _useNeuralNetwork = get_parameter("use_neural_network").as_bool();
-  if (_useNeuralNetwork){
-    RCLCPP_INFO(get_logger(), "[%s]: Using neural network, blob path %s", get_name(), _nn_directory.c_str());
+  _syncNN = get_parameter("use_passthrough_preview").as_bool();
+  if (_useNeuralNetwork) {
+    RCLCPP_INFO(
+      get_logger(), "[%s]: Using neural network, blob path %s",
+      get_name(), _nn_directory.c_str());
   }
 
   // USB2 can only handle one H264 stream from camera. Adding raw camera or mono cameras will
@@ -229,7 +242,11 @@ void DepthAICamera::TryRestarting()
   colorCamera->setResolution(dai::ColorCameraProperties::SensorResolution::THE_1080_P);
 
   // Preview resolution cannot be larger than Video's, thus resolution color camera image is limited
-  colorCamera->setPreviewSize(_videoWidth, _videoHeight);
+  if (_useNeuralNetwork) {
+    colorCamera->setPreviewSize(416, 416);
+  } else {
+    colorCamera->setPreviewSize(_videoWidth, _videoHeight);
+  }
   colorCamera->setVideoSize(_videoWidth, _videoHeight);
   colorCamera->setFps(_videoFps);
 
@@ -241,16 +258,22 @@ void DepthAICamera::TryRestarting()
       xoutColor->input.setBlocking(false);
       xoutColor->input.setQueueSize(1);
       colorCamera->video.link(xoutColor->input);
-    } else {
+    } else if (!_useNeuralNetwork) {
       colorCamera->preview.link(xoutColor->input);
+    } else {
+      RCLCPP_WARN(
+        this->get_logger(), "Color camera video is disabled because neural network is enabled");
     }
   }
 
   auto nnOut = _pipeline->create<dai::node::XLinkOut>();
+  auto nnPassthroughOut = _pipeline->create<dai::node::XLinkOut>();
   nnOut->setStreamName("detections");
-  if (_useNeuralNetwork){
+  nnPassthroughOut->setStreamName("pass");
+  if (_useNeuralNetwork) {
     auto detectionNetwork = _pipeline->create<dai::node::YoloDetectionNetwork>();
-    colorCamera->setPreviewSize(416, 416);
+
+    colorCamera->setPreviewKeepAspectRatio(false);
     colorCamera->setInterleaved(false);
     colorCamera->setColorOrder(dai::ColorCameraProperties::ColorOrder::BGR);
     // Network specific settings
@@ -266,8 +289,8 @@ void DepthAICamera::TryRestarting()
 
     // Linking
     colorCamera->preview.link(detectionNetwork->input);
-    if(_syncNN) {
-        detectionNetwork->passthrough.link(xoutColor->input);
+    if (_syncNN) {
+      detectionNetwork->passthrough.link(nnPassthroughOut->input);
     }
     detectionNetwork->out.link(nnOut->input);
   }
@@ -337,7 +360,7 @@ void DepthAICamera::TryRestarting()
 
   _colorCamInputQueue->send(colorCamCtrl);
 
-  if (_useNeuralNetwork){
+  if (_useNeuralNetwork) {
     _neuralNetworkOutputQueue = _device->getOutputQueue("detections", 30, false);
 
     _neuralNetworkCallback =
@@ -345,6 +368,15 @@ void DepthAICamera::TryRestarting()
       std::bind(
         &DepthAICamera::onNeuralNetworkCallback, this,
         std::placeholders::_1));
+    if (_syncNN) {
+      _passthroughQueue =
+        _device->getOutputQueue("pass", 30, false);
+      _passthroughCallback =
+        _passthroughQueue->addCallback(
+        std::bind(
+          &DepthAICamera::onPassthroughCallback, this,
+          std::placeholders::_1));
+    }
   }
   if (_useRawColorCam) {
     _colorQueue = _device->getOutputQueue("color", 30, false);
@@ -452,6 +484,20 @@ void DepthAICamera::onColorCamCallback(
   }
 }
 
+void DepthAICamera::onPassthroughCallback(
+  const std::shared_ptr<dai::ADatatype> data)
+{
+  (void)data;
+  std::vector<std::shared_ptr<dai::ImgFrame>> colorPtrVector =
+    _passthroughQueue->tryGetAll<dai::ImgFrame>();
+  RCLCPP_DEBUG(
+    this->get_logger(), "[%s]: Received %ld color camera frames...",
+    get_name(), colorPtrVector.size());
+  for (std::shared_ptr<dai::ImgFrame> & colorPtr : colorPtrVector) {
+    auto image = ConvertImage(colorPtr, _color_camera_frame);
+    _passthrough_publisher->publish(*image);
+  }
+}
 
 void DepthAICamera::onVideoEncoderCallback(
   const std::shared_ptr<dai::ADatatype> data)
@@ -498,27 +544,22 @@ void DepthAICamera::onNeuralNetworkCallback(
   const std::shared_ptr<dai::ADatatype> data)
 {
   (void)data;
-  RCLCPP_INFO(this->get_logger(), "[%s]: Received neural network data...",
+  RCLCPP_INFO(
+    this->get_logger(), "[%s]: Received neural network data...",
     get_name());
-  
+
   std::vector<std::shared_ptr<dai::ImgDetections>> detectionsPtrVector =
     _neuralNetworkOutputQueue->tryGetAll<dai::ImgDetections>();
   for (std::shared_ptr<dai::ImgDetections> & detectionsPtr : detectionsPtrVector) {
     for (dai::ImgDetection detection : detectionsPtr->detections) {
-      RCLCPP_INFO(this->get_logger(), "[%s]: Detected %s at (%f, %f), (%f, %f) with confidence %f",
-        get_name(), labelMap[detection.label].c_str(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, detection.confidence);
       if (labelMap[detection.label] == "apple") {
-        RCLCPP_INFO(this->get_logger(), "[%s]: Found apple in at (%f, %f), (%f, %f) with confidence %f",
-          get_name(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, detection.confidence);
+        double dx = ((detection.xmin + detection.xmax) / 2) - 0.5;
+        double dy = ((detection.ymin + detection.ymax) / 2) - 0.5;
 
+        RCLCPP_INFO(
+          this->get_logger(), "[%s]: Apple at (%f, %f), (%f, %f): (%f, %f)",
+          get_name(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, dx, dy);
       }
-      /*
-      auto detection_msg = std::make_shared<DetectionMsg>();
-      detection_msg->header.frame_id = _color_camera_frame;
-      detection_msg->header.stamp = detectionsPtr->getTimestamp();
-      detection_msg->detection = detection;
-      _detection_publisher->publish(*detection_msg);
-      */
     }
   }
 }

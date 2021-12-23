@@ -17,6 +17,7 @@
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <cv_bridge/cv_bridge.h>
@@ -56,7 +57,8 @@ public:
     _leftCamCallback(0),
     _rightCamCallback(0),
     _colorCamCallback(0),
-    _videoEncoderCallback(0)
+    _videoEncoderCallback(0),
+    _passthroughCallback(0)
   {
     Initialize();
     TryRestarting();
@@ -85,7 +87,8 @@ public:
     _leftCamCallback(0),
     _rightCamCallback(0),
     _colorCamCallback(0),
-    _videoEncoderCallback(0)
+    _videoEncoderCallback(0),
+    _passthroughCallback(0)
   {
 
     Initialize();
@@ -116,6 +119,7 @@ private:
   void onLeftCamCallback(const std::shared_ptr<dai::ADatatype> data);
   void onRightCallback(const std::shared_ptr<dai::ADatatype> data);
   void onColorCamCallback(const std::shared_ptr<dai::ADatatype> data);
+  void onPassthroughCallback(const std::shared_ptr<dai::ADatatype> data);
   void onVideoEncoderCallback(const std::shared_ptr<dai::ADatatype> data);
   void onNeuralNetworkCallback(const std::shared_ptr<dai::ADatatype> data);
   std::shared_ptr<ImageMsg> ConvertImage(std::shared_ptr<dai::ImgFrame>, const std::string &);
@@ -128,6 +132,7 @@ private:
   std::shared_ptr<dai::DataOutputQueue> _leftQueue;
   std::shared_ptr<dai::DataOutputQueue> _rightQueue;
   std::shared_ptr<dai::DataOutputQueue> _colorQueue;
+  std::shared_ptr<dai::DataOutputQueue> _passthroughQueue;
   std::shared_ptr<dai::DataInputQueue> _colorCamInputQueue;
   std::shared_ptr<dai::DataOutputQueue> _neuralNetworkOutputQueue;
 
@@ -149,14 +154,17 @@ private:
   std::shared_ptr<rclcpp::Publisher<ImageMsg>> _left_publisher;
   std::shared_ptr<rclcpp::Publisher<ImageMsg>> _right_publisher;
   std::shared_ptr<rclcpp::Publisher<ImageMsg>> _color_publisher;
+  std::shared_ptr<rclcpp::Publisher<ImageMsg>> _passthrough_publisher;
   std::shared_ptr<rclcpp::Publisher<CompressedImageMsg>> _video_publisher;
+  std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>> _goal_pose_publisher;
+
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr _stream_command_subscriber;
 
   std::atomic<bool> _thread_running;
   std::string _left_camera_frame, _right_camera_frame, _color_camera_frame;
   std::string _nn_directory;
   dai::DataOutputQueue::CallbackId _leftCamCallback, _rightCamCallback, _colorCamCallback,
-    _videoEncoderCallback, _neuralNetworkCallback;
+    _videoEncoderCallback, _neuralNetworkCallback, _passthroughCallback;
 
   std::unordered_map<dai::RawImgFrame::Type, std::string> encodingEnumMap = {
     {dai::RawImgFrame::Type::YUV422i, "yuv422"},
