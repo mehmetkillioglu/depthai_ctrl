@@ -17,7 +17,9 @@
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <opencv2/opencv.hpp>
 #include <iostream>
+#include <cv_bridge/cv_bridge.h>
 
 namespace depthai_ctrl
 {
@@ -41,6 +43,7 @@ public:
     _videoH265(false),
     _useMonoCams(false),
     _useRawColorCam(false),
+    _useVideoFromColorCam(true),
     _useAutoFocus(false),
     _useUSB3(false),
     _useNeuralNetwork(false),
@@ -69,6 +72,7 @@ public:
     _videoH265(false),
     _useMonoCams(false),
     _useRawColorCam(false),
+    _useVideoFromColorCam(true),
     _useAutoFocus(false),
     _useUSB3(false),
     _useNeuralNetwork(false),
@@ -135,6 +139,7 @@ private:
   bool _videoH265;
   bool _useMonoCams;
   bool _useRawColorCam;
+  bool _useVideoFromColorCam;
   bool _useAutoFocus;
   bool _useUSB3;
   bool _useNeuralNetwork;
@@ -162,6 +167,11 @@ private:
     {dai::RawImgFrame::Type::RAW8, "8UC1"},
     {dai::RawImgFrame::Type::RAW16, "16UC1"}};
 
+  std::unordered_map<dai::RawImgFrame::Type, std::string> planarEncodingEnumMap = {
+    {dai::RawImgFrame::Type::BGR888p, "rgb8"},  // 3_1_bgr8 represents 3 planes/channels and 1 byte per pixel in BGR format
+    {dai::RawImgFrame::Type::RGB888p, "rgb8"},
+    {dai::RawImgFrame::Type::NV12, "rgb8"},
+    {dai::RawImgFrame::Type::YUV420p, "rgb8"}};
 };
 
 }  // namespace depthai_ctrl
