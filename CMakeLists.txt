@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 # all these settings are needed to properly compile depthai-core as subdirectory
-set(BUILD_SHARED_LIBS OFF)
+set(BUILD_SHARED_LIBS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_definitions(-DSPDLOG_ACTIVE_LEVEL=6)
 add_definitions(-DSPDLOG_HEADER_ONLY=1)

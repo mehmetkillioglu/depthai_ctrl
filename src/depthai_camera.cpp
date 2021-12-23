@@ -264,7 +264,7 @@ void DepthAICamera::TryRestarting()
     detectionNetwork->out.link(nnOut->input);
   }
   Profile encoding = _videoH265 ? Profile::H265_MAIN : Profile::H264_MAIN;
-  videoEncoder->setDefaultProfilePreset(_videoWidth, _videoHeight, _videoFps, encoding);
+  videoEncoder->setDefaultProfilePreset(_videoFps, encoding);
   videoEncoder->setBitrate(_videoBitrate);
   RCLCPP_INFO(
     this->get_logger(), "[%s]: VideoEncoder FPS: %f",
@@ -499,8 +499,8 @@ void DepthAICamera::onNeuralNetworkCallback(
     for (dai::ImgDetection detection : detectionsPtr->detections) {
       RCLCPP_INFO(this->get_logger(), "[%s]: Detected %s at (%f, %f), (%f, %f) with confidence %f",
         get_name(), labelMap[detection.label].c_str(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, detection.confidence);
-      if (labelMap[detection.label] == "orange") {
-        RCLCPP_INFO(this->get_logger(), "[%s]: Found orange in at (%f, %f), (%f, %f) with confidence %f",
+      if (labelMap[detection.label] == "apple") {
+        RCLCPP_INFO(this->get_logger(), "[%s]: Found apple in at (%f, %f), (%f, %f) with confidence %f",
           get_name(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, detection.confidence);
 
       }
