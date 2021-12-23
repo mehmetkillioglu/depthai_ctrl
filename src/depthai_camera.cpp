@@ -11,6 +11,16 @@ using Profile = dai::VideoEncoderProperties::Profile;
 using std::chrono::duration_cast;
 using std::chrono::nanoseconds;
 using std::chrono::seconds;
+static const std::vector<std::string> labelMap = {
+    "person",        "bicycle",      "car",           "motorbike",     "aeroplane",   "bus",         "train",       "truck",        "boat",
+    "traffic light", "fire hydrant", "stop sign",     "parking meter", "bench",       "bird",        "cat",         "dog",          "horse",
+    "sheep",         "cow",          "elephant",      "bear",          "zebra",       "giraffe",     "backpack",    "umbrella",     "handbag",
+    "tie",           "suitcase",     "frisbee",       "skis",          "snowboard",   "sports ball", "kite",        "baseball bat", "baseball glove",
+    "skateboard",    "surfboard",    "tennis racket", "bottle",        "wine glass",  "cup",         "fork",        "knife",        "spoon",
+    "bowl",          "banana",       "apple",         "sandwich",      "orange",      "broccoli",    "carrot",      "hot dog",      "pizza",
+    "donut",         "cake",         "chair",         "sofa",          "pottedplant", "bed",         "diningtable", "toilet",       "tvmonitor",
+    "laptop",        "mouse",        "remote",        "keyboard",      "cell phone",  "microwave",   "oven",        "toaster",      "sink",
+    "refrigerator",  "book",         "clock",         "vase",          "scissors",    "teddy bear",  "hair drier",  "toothbrush"};
 
 void DepthAICamera::Initialize()
 {
@@ -20,12 +30,15 @@ void DepthAICamera::Initialize()
   declare_parameter<std::string>("color_camera_topic", "camera/color/image_raw");
   declare_parameter<std::string>("video_stream_topic", "camera/color/video");
   declare_parameter<std::string>("stream_control_topic", "videostreamcmd");
+  declare_parameter<std::string>("nn_directory", "tiny-yolo-v4_openvino_2021.2_6shave.blob");
+  
 
   const std::string left_camera_topic = get_parameter("left_camera_topic").as_string();
   const std::string right_camera_topic = get_parameter("right_camera_topic").as_string();
   const std::string color_camera_topic = get_parameter("color_camera_topic").as_string();
   const std::string video_stream_topic = get_parameter("video_stream_topic").as_string();
   const std::string stream_control_topic = get_parameter("stream_control_topic").as_string();
+  _nn_directory = get_parameter("nn_directory").as_string();
 
   _left_publisher = create_publisher<ImageMsg>(left_camera_topic, rclcpp::SensorDataQoS());
   _right_publisher = create_publisher<ImageMsg>(right_camera_topic, rclcpp::SensorDataQoS());
@@ -48,6 +61,7 @@ void DepthAICamera::Initialize()
   declare_parameter<bool>("use_raw_color_cam", false);
   declare_parameter<bool>("use_auto_focus", false);
   declare_parameter<bool>("use_usb_three", false);
+  declare_parameter<bool>("use_neural_network", false);
 
   _videoWidth = get_parameter("width").as_int();
   _videoHeight = get_parameter("height").as_int();
@@ -58,6 +72,10 @@ void DepthAICamera::Initialize()
   _useMonoCams = get_parameter("use_mono_cams").as_bool();
   _useRawColorCam = get_parameter("use_raw_color_cam").as_bool();
   _useAutoFocus = get_parameter("use_auto_focus").as_bool();
+  _useNeuralNetwork = get_parameter("use_neural_network").as_bool();
+  if (_useNeuralNetwork){
+    RCLCPP_INFO(get_logger(), "[%s]: Using neural network, blob path %s", get_name(), _nn_directory.c_str());
+  }
 
   // USB2 can only handle one H264 stream from camera. Adding raw camera or mono cameras will
   // cause dropped messages and unstable latencies between frames. When using USB3, we can
@@ -202,7 +220,6 @@ void DepthAICamera::TryRestarting()
   }
   auto colorCamera = _pipeline->create<dai::node::ColorCamera>();
   auto videoEncoder = _pipeline->create<dai::node::VideoEncoder>();
-
   auto xoutVideo = _pipeline->create<dai::node::XLinkOut>();
   xoutVideo->setStreamName("enc26xColor");
   // Setup Color Camera
@@ -215,12 +232,37 @@ void DepthAICamera::TryRestarting()
   colorCamera->setFps(_videoFps);
 
   // Like mono cameras, color camera is disabled by default to reduce computational load.
+  auto xoutColor = _pipeline->create<dai::node::XLinkOut>();
+  xoutColor->setStreamName("color");
   if (_useRawColorCam) {
-    auto xoutColor = _pipeline->create<dai::node::XLinkOut>();
-    xoutColor->setStreamName("color");
     colorCamera->preview.link(xoutColor->input);
   }
 
+  auto nnOut = _pipeline->create<dai::node::XLinkOut>();
+  nnOut->setStreamName("detections");
+  if (_useNeuralNetwork){
+    auto detectionNetwork = _pipeline->create<dai::node::YoloDetectionNetwork>();
+    colorCamera->setPreviewSize(416, 416);
+    colorCamera->setInterleaved(false);
+    colorCamera->setColorOrder(dai::ColorCameraProperties::ColorOrder::BGR);
+    // Network specific settings
+    detectionNetwork->setConfidenceThreshold(0.5f);
+    detectionNetwork->setNumClasses(80);
+    detectionNetwork->setCoordinateSize(4);
+    detectionNetwork->setAnchors({10, 14, 23, 27, 37, 58, 81, 82, 135, 169, 344, 319});
+    detectionNetwork->setAnchorMasks({{"side26", {1, 2, 3}}, {"side13", {3, 4, 5}}});
+    detectionNetwork->setIouThreshold(0.5f);
+    detectionNetwork->setBlobPath(_nn_directory);
+    detectionNetwork->setNumInferenceThreads(2);
+    detectionNetwork->input.setBlocking(false);
+
+    // Linking
+    colorCamera->preview.link(detectionNetwork->input);
+    if(_syncNN) {
+        detectionNetwork->passthrough.link(xoutColor->input);
+    }
+    detectionNetwork->out.link(nnOut->input);
+  }
   Profile encoding = _videoH265 ? Profile::H265_MAIN : Profile::H264_MAIN;
   videoEncoder->setDefaultProfilePreset(_videoWidth, _videoHeight, _videoFps, encoding);
   videoEncoder->setBitrate(_videoBitrate);
@@ -287,6 +329,15 @@ void DepthAICamera::TryRestarting()
 
   _colorCamInputQueue->send(colorCamCtrl);
 
+  if (_useNeuralNetwork){
+    _neuralNetworkOutputQueue = _device->getOutputQueue("detections", 30, false);
+
+    _neuralNetworkCallback =
+      _neuralNetworkOutputQueue->addCallback(
+      std::bind(
+        &DepthAICamera::onNeuralNetworkCallback, this,
+        std::placeholders::_1));
+  }
   if (_useRawColorCam) {
     _colorQueue = _device->getOutputQueue("color", 30, false);
     _colorCamCallback =
@@ -435,6 +486,34 @@ void DepthAICamera::onVideoEncoderCallback(
   }
 }
 
+void DepthAICamera::onNeuralNetworkCallback(
+  const std::shared_ptr<dai::ADatatype> data)
+{
+  (void)data;
+  RCLCPP_INFO(this->get_logger(), "[%s]: Received neural network data...",
+    get_name());
+  
+  std::vector<std::shared_ptr<dai::ImgDetections>> detectionsPtrVector =
+    _neuralNetworkOutputQueue->tryGetAll<dai::ImgDetections>();
+  for (std::shared_ptr<dai::ImgDetections> & detectionsPtr : detectionsPtrVector) {
+    for (dai::ImgDetection detection : detectionsPtr->detections) {
+      RCLCPP_INFO(this->get_logger(), "[%s]: Detected %s at (%f, %f), (%f, %f) with confidence %f",
+        get_name(), labelMap[detection.label].c_str(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, detection.confidence);
+      if (labelMap[detection.label] == "orange") {
+        RCLCPP_INFO(this->get_logger(), "[%s]: Found orange in at (%f, %f), (%f, %f) with confidence %f",
+          get_name(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, detection.confidence);
+
+      }
+      /*
+      auto detection_msg = std::make_shared<DetectionMsg>();
+      detection_msg->header.frame_id = _color_camera_frame;
+      detection_msg->header.stamp = detectionsPtr->getTimestamp();
+      detection_msg->detection = detection;
+      _detection_publisher->publish(*detection_msg);
+      */
+    }
+  }
+}
 std::shared_ptr<DepthAICamera::ImageMsg> DepthAICamera::ConvertImage(
   const std::shared_ptr<dai::ImgFrame> input,
   const std::string & frame_id)

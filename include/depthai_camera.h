@@ -3,6 +3,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 #include <depthai/device/Device.hpp>
+#include <depthai/depthai.hpp>
 #include <depthai/pipeline/datatype/ImgFrame.hpp>
 #include <depthai/pipeline/node/ColorCamera.hpp>
 #include <depthai/pipeline/node/MonoCamera.hpp>
@@ -42,10 +43,13 @@ public:
     _useRawColorCam(false),
     _useAutoFocus(false),
     _useUSB3(false),
+    _useNeuralNetwork(false),
+    _syncNN(true),
     _thread_running(false),
     _left_camera_frame("left_camera_frame"),
     _right_camera_frame("right_camera_frame"),
     _color_camera_frame("color_camera_frame"),
+    _nn_directory("tiny-yolo-v4_openvino_2021.2_6shave.blob"),
     _leftCamCallback(0),
     _rightCamCallback(0),
     _colorCamCallback(0),
@@ -67,10 +71,13 @@ public:
     _useRawColorCam(false),
     _useAutoFocus(false),
     _useUSB3(false),
+    _useNeuralNetwork(false),
+    _syncNN(true),
     _thread_running(false),
     _left_camera_frame("left_camera_frame"),
     _right_camera_frame("right_camera_frame"),
     _color_camera_frame("color_camera_frame"),
+    _nn_directory("tiny-yolo-v4_openvino_2021.2_6shave.blob"),
     _leftCamCallback(0),
     _rightCamCallback(0),
     _colorCamCallback(0),
@@ -106,6 +113,7 @@ private:
   void onRightCallback(const std::shared_ptr<dai::ADatatype> data);
   void onColorCamCallback(const std::shared_ptr<dai::ADatatype> data);
   void onVideoEncoderCallback(const std::shared_ptr<dai::ADatatype> data);
+  void onNeuralNetworkCallback(const std::shared_ptr<dai::ADatatype> data);
   std::shared_ptr<ImageMsg> ConvertImage(std::shared_ptr<dai::ImgFrame>, const std::string &);
   void Initialize();
   void VideoStreamCommand(std_msgs::msg::String::SharedPtr);
@@ -117,6 +125,7 @@ private:
   std::shared_ptr<dai::DataOutputQueue> _rightQueue;
   std::shared_ptr<dai::DataOutputQueue> _colorQueue;
   std::shared_ptr<dai::DataInputQueue> _colorCamInputQueue;
+  std::shared_ptr<dai::DataOutputQueue> _neuralNetworkOutputQueue;
 
   int _videoWidth;
   int _videoHeight;
@@ -128,6 +137,8 @@ private:
   bool _useRawColorCam;
   bool _useAutoFocus;
   bool _useUSB3;
+  bool _useNeuralNetwork;
+  bool _syncNN;
   rclcpp::Time _lastFrameTime;
 
   std::shared_ptr<rclcpp::Publisher<ImageMsg>> _left_publisher;
@@ -138,8 +149,9 @@ private:
 
   std::atomic<bool> _thread_running;
   std::string _left_camera_frame, _right_camera_frame, _color_camera_frame;
+  std::string _nn_directory;
   dai::DataOutputQueue::CallbackId _leftCamCallback, _rightCamCallback, _colorCamCallback,
-    _videoEncoderCallback;
+    _videoEncoderCallback, _neuralNetworkCallback;
 
   std::unordered_map<dai::RawImgFrame::Type, std::string> encodingEnumMap = {
     {dai::RawImgFrame::Type::YUV422i, "yuv422"},
