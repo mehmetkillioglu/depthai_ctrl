@@ -1,4 +1,4 @@
-#include "depthai_camera.h"
+#include "depthai_ctrl/depthai_camera.h"
 #include "gtest/gtest.h"
 
 using ImageMsg = depthai_ctrl::DepthAICamera::ImageMsg;

@@ -34,6 +34,8 @@ endif()
 #find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(camera_info_manager REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -58,10 +60,35 @@ include_directories(SYSTEM ${GST_INCLUDE_DIRS})
 include_directories(include)
 link_directories(${GST_LIBRARY_DIRS})
 
+
+
+set(camera_dependencies
+rclcpp
+sensor_msgs
+geometry_msgs
+std_msgs
+vision_msgs
+camera_info_manager
+cv_bridge
+vision_opencv
+image_transport
+)
+
+FILE(GLOB LIB_SRC
+"src/ImageConverter.cpp"
+"src/ImgDetectionConverter.cpp"
+"src/ImuConverter.cpp"
+)
+
+add_library(depthai_bridge SHARED ${LIB_SRC})
+ament_target_dependencies(depthai_bridge PUBLIC ${camera_dependencies})
+target_link_libraries(depthai_bridge PUBLIC depthai-core opencv_imgproc opencv_highgui)
+
+
 # DepthAI Camera as Component library
 add_library(depthai_camera SHARED src/depthai_camera.cpp)
-ament_target_dependencies(depthai_camera PUBLIC rclcpp std_msgs sensor_msgs vision_msgs geometry_msgs cv_bridge vision_opencv)
-target_link_libraries(depthai_camera PUBLIC depthai-core opencv_imgproc opencv_highgui)
+ament_target_dependencies(depthai_camera PUBLIC ${camera_dependencies})
+target_link_libraries(depthai_camera PUBLIC depthai-core opencv_imgproc opencv_highgui depthai_bridge)
 
 
 # DepthAI Camera as separate node
@@ -131,7 +158,7 @@ install(TARGETS
         DESTINATION lib/${PROJECT_NAME})
 
 
-install(DIRECTORY launch
+install(DIRECTORY launch params urdf
         DESTINATION share/${PROJECT_NAME}
         )
 

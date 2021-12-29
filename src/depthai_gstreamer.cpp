@@ -1,12 +1,12 @@
-#include "depthai_gstreamer.h"
-#include "depthai_utils.h"
+#include "depthai_ctrl/depthai_gstreamer.h"
+#include "depthai_ctrl/depthai_utils.h"
 #include <gst/app/gstappsrc.h>
 #include <gst/gst.h>
 #include <gst/gstbus.h>
 #include <gst/gstcaps.h>
 #include <gst/gstelement.h>
 #include <gst/gstpipeline.h>
-#include <gstreamer_interface.hpp>
+#include <depthai_ctrl/gstreamer_interface.hpp>
 #include <nlohmann/json.hpp>
 #include <mutex>
 #include <queue>

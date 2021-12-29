@@ -1,5 +1,5 @@
-#include "depthai_camera.h"
-#include "depthai_utils.h"
+#include "depthai_ctrl/depthai_camera.h"
+#include "depthai_ctrl/depthai_utils.h"
 #include <nlohmann/json.hpp>
 
 using namespace depthai_ctrl;
@@ -36,6 +36,7 @@ void DepthAICamera::Initialize()
   declare_parameter<std::string>("stream_control_topic", "videostreamcmd");
   declare_parameter<std::string>("detection_roi_topic", "detections");
   declare_parameter<std::string>("nn_directory", "tiny-yolo-v4_openvino_2021.2_6shave.blob");
+  declare_parameter<std::string>("camera_name", "oak");
 
 
   const std::string left_camera_topic = get_parameter("left_camera_topic").as_string();
@@ -51,7 +52,8 @@ void DepthAICamera::Initialize()
   _right_publisher = create_publisher<ImageMsg>(right_camera_topic, 10);
   _color_publisher = create_publisher<ImageMsg>(color_camera_topic, 10);
   _passthrough_publisher = create_publisher<ImageMsg>(passthrough_topic, 10);
-  _detection_roi_publisher = create_publisher<vision_msgs::msg::Detection2DArray>(detection_roi_topic, 1);
+  _detection_roi_publisher = create_publisher<vision_msgs::msg::Detection2DArray>(
+    detection_roi_topic, 1);
   _video_publisher = create_publisher<CompressedImageMsg>(
     video_stream_topic,
     rclcpp::SystemDefaultsQoS());
@@ -285,7 +287,7 @@ void DepthAICamera::TryRestarting()
     detectionNetwork->setIouThreshold(0.5f);
     detectionNetwork->setBlobPath(_nn_directory);
     detectionNetwork->setNumInferenceThreads(2);
-    
+
     detectionNetwork->input.setBlocking(false);
 
     // Linking
@@ -320,6 +322,38 @@ void DepthAICamera::TryRestarting()
   if (!_device) {
     return;
   }
+
+  _calibrationHandler = _device->readCalibration();
+
+  dai::rosBridge::ImageConverter rgbConverter(_color_camera_frame, true);
+  sensor_msgs::msg::CameraInfo rgbCameraInfo = rgbConverter.calibrationToCameraInfo(
+    _calibrationHandler, dai::CameraBoardSocket::RGB, _videoWidth, _videoHeight);
+  // print camerainfo
+  RCLCPP_INFO(this->get_logger(), "[%s]: CameraInfo:", get_name());
+  RCLCPP_INFO(this->get_logger(), "[%s]:   width: %d", get_name(), rgbCameraInfo.width);
+  RCLCPP_INFO(this->get_logger(), "[%s]:   height: %d", get_name(), rgbCameraInfo.height);
+  RCLCPP_INFO(
+    this->get_logger(), "[%s]:   distortion_model: %s",
+    get_name(), rgbCameraInfo.distortion_model.c_str());
+  RCLCPP_INFO(
+    this->get_logger(), "[%s]:   D: [%f, %f, %f, %f, %f]",
+    get_name(), rgbCameraInfo.d[0], rgbCameraInfo.d[1], rgbCameraInfo.d[2], rgbCameraInfo.d[3],
+    rgbCameraInfo.d[4]);
+  RCLCPP_INFO(
+    this->get_logger(), "[%s]:   K: [%f, %f, %f, %f, %f, %f, %f, %f, %f]",
+    get_name(), rgbCameraInfo.k[0], rgbCameraInfo.k[1], rgbCameraInfo.k[2], rgbCameraInfo.k[3],
+    rgbCameraInfo.k[4], rgbCameraInfo.k[5], rgbCameraInfo.k[6], rgbCameraInfo.k[7],
+    rgbCameraInfo.k[8]);
+  RCLCPP_INFO(
+    this->get_logger(), "[%s]:   R: [%f, %f, %f, %f, %f, %f, %f, %f, %f]",
+    get_name(), rgbCameraInfo.r[0], rgbCameraInfo.r[1], rgbCameraInfo.r[2], rgbCameraInfo.r[3],
+    rgbCameraInfo.r[4], rgbCameraInfo.r[5], rgbCameraInfo.r[6], rgbCameraInfo.r[7],
+    rgbCameraInfo.r[8]);
+  RCLCPP_INFO(
+    this->get_logger(), "[%s]:   P: [%f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f]",
+    get_name(), rgbCameraInfo.p[0], rgbCameraInfo.p[1], rgbCameraInfo.p[2], rgbCameraInfo.p[3],
+    rgbCameraInfo.p[4], rgbCameraInfo.p[5], rgbCameraInfo.p[6], rgbCameraInfo.p[7],
+    rgbCameraInfo.p[8], rgbCameraInfo.p[9], rgbCameraInfo.p[10], rgbCameraInfo.p[11]);
 
   std::string usbSpeed;
   switch (_device->getUsbSpeed()) {
@@ -360,7 +394,41 @@ void DepthAICamera::TryRestarting()
   }
 
   _colorCamInputQueue->send(colorCamCtrl);
-
+  //dai::rosBridge::ImageConverter rgbConverter(_color_camera_frame, false);
+  //auto _node_ptr = this->shared_from_this();
+  /*if (_useNeuralNetwork) {
+    _neuralNetworkOutputQueue = _device->getOutputQueue("detections", 30, false);
+    dai::rosBridge::ImgDetectionConverter detConverter(_color_camera_frame,
+      416, 416, false);
+    dai::rosBridge::BridgePublisher<vision_msgs::msg::Detection2DArray,
+      dai::ImgDetections> detectionPublish(_neuralNetworkOutputQueue,
+      shared_from_this(),
+      std::string("color/mobilenet_detections"),
+      std::bind(
+        static_cast<void (dai::rosBridge::ImgDetectionConverter::*)(
+          std::shared_ptr<dai::ImgDetections>,
+          vision_msgs::msg::Detection2DArray &)>(&dai::rosBridge::ImgDetectionConverter::toRosMsg),
+        &detConverter,
+        std::placeholders::_1,
+        std::placeholders::_2),
+      30);
+    if (_syncNN) {
+      dai::rosBridge::ImageConverter rgbPassConverter(_color_camera_frame, false);
+      _passthroughQueue =
+        _device->getOutputQueue("pass", 30, false);
+      dai::rosBridge::BridgePublisher<sensor_msgs::msg::Image, dai::ImgFrame> passThroughPublish(
+        _passthroughQueue,
+      shared_from_this(),
+        std::string("color/image"),
+        std::bind(
+          &dai::rosBridge::ImageConverter::toRosMsg,
+          &rgbPassConverter,
+          std::placeholders::_1,
+          std::placeholders::_2),
+        30,
+        rgbCameraInfo,
+        "color");
+    }*/
   if (_useNeuralNetwork) {
     _neuralNetworkOutputQueue = _device->getOutputQueue("detections", 30, false);
 
@@ -554,16 +622,18 @@ void DepthAICamera::onNeuralNetworkCallback(
   for (std::shared_ptr<dai::ImgDetections> & detectionsPtr : detectionsPtrVector) {
     vision_msgs::msg::Detection2DArray detection_array;
     detection_array.detections.resize(detectionsPtr->detections.size());
-      detection_array.header.stamp = this->get_clock()->now();
-      detection_array.header.frame_id = _color_camera_frame;
+    detection_array.header.stamp = this->get_clock()->now();
+    detection_array.header.frame_id = _color_camera_frame;
     for (unsigned long i = 0; i < detectionsPtr->detections.size(); ++i) {
       detection_array.detections[i].header.frame_id = _color_camera_frame;
       detection_array.detections[i].header.stamp = this->get_clock()->now();
       detection_array.detections[i].id = labelMap[detectionsPtr->detections[i].label];
       detection_array.detections[i].results.resize(1);
-      detection_array.detections[i].results[0].hypothesis.class_id = std::to_string(detectionsPtr->detections[i].label);
-      detection_array.detections[i].results[0].hypothesis.score = detectionsPtr->detections[i].confidence;
-      
+      detection_array.detections[i].results[0].hypothesis.class_id = std::to_string(
+        detectionsPtr->detections[i].label);
+      detection_array.detections[i].results[0].hypothesis.score =
+        detectionsPtr->detections[i].confidence;
+
       double xMin = detectionsPtr->detections[i].xmin * _videoWidth;
       double yMin = detectionsPtr->detections[i].ymin * _videoHeight;
       double xMax = detectionsPtr->detections[i].xmax * _videoWidth;
@@ -581,11 +651,14 @@ void DepthAICamera::onNeuralNetworkCallback(
       _detection_roi_publisher->publish(detection_array);
 
       if (labelMap[detectionsPtr->detections[i].label] == "apple") {
-        double dx = ((detectionsPtr->detections[i].xmin + detectionsPtr->detections[i].xmax) / 2) - 0.5;
-        double dy = ((detectionsPtr->detections[i].ymin + detectionsPtr->detections[i].ymax) / 2) - 0.5;
+        double dx = ((detectionsPtr->detections[i].xmin + detectionsPtr->detections[i].xmax) / 2) -
+          0.5;
+        double dy = ((detectionsPtr->detections[i].ymin + detectionsPtr->detections[i].ymax) / 2) -
+          0.5;
         RCLCPP_INFO(
           this->get_logger(), "[%s]: Apple at (%f, %f), (%f, %f): (%f, %f)",
-          get_name(), detectionsPtr->detections[i].xmin, detectionsPtr->detections[i].ymin, detectionsPtr->detections[i].xmax, detectionsPtr->detections[i].ymax, dx, dy);
+          get_name(), detectionsPtr->detections[i].xmin, detectionsPtr->detections[i].ymin,
+          detectionsPtr->detections[i].xmax, detectionsPtr->detections[i].ymax, dx, dy);
       }
     }
   }

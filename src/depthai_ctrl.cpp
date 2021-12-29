@@ -1,6 +1,6 @@
 #include <memory>
-#include "depthai_camera.h"
-#include "depthai_gstreamer.h"
+#include "depthai_ctrl/depthai_camera.h"
+#include "depthai_ctrl/depthai_gstreamer.h"
 #include <rclcpp/rclcpp.hpp>
 
 using namespace depthai_ctrl;
