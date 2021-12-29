@@ -37,6 +37,7 @@ find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(vision_msgs REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0)
 find_package(nlohmann_json REQUIRED)
@@ -59,7 +60,7 @@ link_directories(${GST_LIBRARY_DIRS})
 
 # DepthAI Camera as Component library
 add_library(depthai_camera SHARED src/depthai_camera.cpp)
-ament_target_dependencies(depthai_camera PUBLIC rclcpp std_msgs sensor_msgs geometry_msgs cv_bridge vision_opencv)
+ament_target_dependencies(depthai_camera PUBLIC rclcpp std_msgs sensor_msgs vision_msgs geometry_msgs cv_bridge vision_opencv)
 target_link_libraries(depthai_camera PUBLIC depthai-core opencv_imgproc opencv_highgui)
 
 

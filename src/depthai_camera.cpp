@@ -34,7 +34,7 @@ void DepthAICamera::Initialize()
   declare_parameter<std::string>("video_stream_topic", "camera/color/video");
   declare_parameter<std::string>("passthrough_topic", "camera/color/image_passthrough");
   declare_parameter<std::string>("stream_control_topic", "videostreamcmd");
-  declare_parameter<std::string>("goal_pose_topic", "goal_pose");
+  declare_parameter<std::string>("detection_roi_topic", "detections");
   declare_parameter<std::string>("nn_directory", "tiny-yolo-v4_openvino_2021.2_6shave.blob");
 
 
@@ -43,15 +43,15 @@ void DepthAICamera::Initialize()
   const std::string color_camera_topic = get_parameter("color_camera_topic").as_string();
   const std::string video_stream_topic = get_parameter("video_stream_topic").as_string();
   const std::string passthrough_topic = get_parameter("passthrough_topic").as_string();
-  const std::string goal_pose_topic = get_parameter("goal_pose_topic").as_string();
+  const std::string detection_roi_topic = get_parameter("detection_roi_topic").as_string();
   const std::string stream_control_topic = get_parameter("stream_control_topic").as_string();
   _nn_directory = get_parameter("nn_directory").as_string();
 
-  _left_publisher = create_publisher<ImageMsg>(left_camera_topic, rclcpp::SensorDataQoS());
-  _right_publisher = create_publisher<ImageMsg>(right_camera_topic, rclcpp::SensorDataQoS());
-  _color_publisher = create_publisher<ImageMsg>(color_camera_topic, rclcpp::SensorDataQoS());
-  _passthrough_publisher = create_publisher<ImageMsg>(passthrough_topic, rclcpp::SensorDataQoS());
-  _goal_pose_publisher = create_publisher<geometry_msgs::msg::Vector3Stamped>(goal_pose_topic, 1);
+  _left_publisher = create_publisher<ImageMsg>(left_camera_topic, 10);
+  _right_publisher = create_publisher<ImageMsg>(right_camera_topic, 10);
+  _color_publisher = create_publisher<ImageMsg>(color_camera_topic, 10);
+  _passthrough_publisher = create_publisher<ImageMsg>(passthrough_topic, 10);
+  _detection_roi_publisher = create_publisher<vision_msgs::msg::Detection2DArray>(detection_roi_topic, 1);
   _video_publisher = create_publisher<CompressedImageMsg>(
     video_stream_topic,
     rclcpp::SystemDefaultsQoS());
@@ -285,6 +285,7 @@ void DepthAICamera::TryRestarting()
     detectionNetwork->setIouThreshold(0.5f);
     detectionNetwork->setBlobPath(_nn_directory);
     detectionNetwork->setNumInferenceThreads(2);
+    
     detectionNetwork->input.setBlocking(false);
 
     // Linking
@@ -551,14 +552,40 @@ void DepthAICamera::onNeuralNetworkCallback(
   std::vector<std::shared_ptr<dai::ImgDetections>> detectionsPtrVector =
     _neuralNetworkOutputQueue->tryGetAll<dai::ImgDetections>();
   for (std::shared_ptr<dai::ImgDetections> & detectionsPtr : detectionsPtrVector) {
-    for (dai::ImgDetection detection : detectionsPtr->detections) {
-      if (labelMap[detection.label] == "apple") {
-        double dx = ((detection.xmin + detection.xmax) / 2) - 0.5;
-        double dy = ((detection.ymin + detection.ymax) / 2) - 0.5;
+    vision_msgs::msg::Detection2DArray detection_array;
+    detection_array.detections.resize(detectionsPtr->detections.size());
+      detection_array.header.stamp = this->get_clock()->now();
+      detection_array.header.frame_id = _color_camera_frame;
+    for (unsigned long i = 0; i < detectionsPtr->detections.size(); ++i) {
+      detection_array.detections[i].header.frame_id = _color_camera_frame;
+      detection_array.detections[i].header.stamp = this->get_clock()->now();
+      detection_array.detections[i].id = labelMap[detectionsPtr->detections[i].label];
+      detection_array.detections[i].results.resize(1);
+      detection_array.detections[i].results[0].hypothesis.class_id = std::to_string(detectionsPtr->detections[i].label);
+      detection_array.detections[i].results[0].hypothesis.score = detectionsPtr->detections[i].confidence;
+      
+      double xMin = detectionsPtr->detections[i].xmin * _videoWidth;
+      double yMin = detectionsPtr->detections[i].ymin * _videoHeight;
+      double xMax = detectionsPtr->detections[i].xmax * _videoWidth;
+      double yMax = detectionsPtr->detections[i].ymax * _videoHeight;
 
+      float xSize = xMax - xMin;
+      float ySize = yMax - yMin;
+      float xCenter = xMin + xSize / 2;
+      float yCenter = yMin + ySize / 2;
+
+      detection_array.detections[i].bbox.center.x = xCenter;
+      detection_array.detections[i].bbox.center.y = yCenter;
+      detection_array.detections[i].bbox.size_x = xSize;
+      detection_array.detections[i].bbox.size_y = ySize;
+      _detection_roi_publisher->publish(detection_array);
+
+      if (labelMap[detectionsPtr->detections[i].label] == "apple") {
+        double dx = ((detectionsPtr->detections[i].xmin + detectionsPtr->detections[i].xmax) / 2) - 0.5;
+        double dy = ((detectionsPtr->detections[i].ymin + detectionsPtr->detections[i].ymax) / 2) - 0.5;
         RCLCPP_INFO(
           this->get_logger(), "[%s]: Apple at (%f, %f), (%f, %f): (%f, %f)",
-          get_name(), detection.xmin, detection.ymin, detection.xmax, detection.ymax, dx, dy);
+          get_name(), detectionsPtr->detections[i].xmin, detectionsPtr->detections[i].ymin, detectionsPtr->detections[i].xmax, detectionsPtr->detections[i].ymax, dx, dy);
       }
     }
   }

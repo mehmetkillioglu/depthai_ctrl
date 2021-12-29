@@ -18,6 +18,9 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <geometry_msgs/msg/vector3_stamped.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <sensor_msgs/msg/region_of_interest.hpp>
+#include <vision_msgs/msg/detection2_d_array.hpp>
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <cv_bridge/cv_bridge.h>
@@ -156,7 +159,7 @@ private:
   std::shared_ptr<rclcpp::Publisher<ImageMsg>> _color_publisher;
   std::shared_ptr<rclcpp::Publisher<ImageMsg>> _passthrough_publisher;
   std::shared_ptr<rclcpp::Publisher<CompressedImageMsg>> _video_publisher;
-  std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>> _goal_pose_publisher;
+  std::shared_ptr<rclcpp::Publisher<vision_msgs::msg::Detection2DArray>> _detection_roi_publisher;
 
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr _stream_command_subscriber;
 
