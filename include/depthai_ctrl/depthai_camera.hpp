@@ -182,7 +182,6 @@ private:
   std::shared_ptr<dai::rosBridge::ImageConverter> _right_camera_converter;
   std::shared_ptr<dai::rosBridge::ImageConverter> _passthrough_converter;
   std::shared_ptr<dai::rosBridge::ImgDetectionConverter> _neural_network_converter;
-
   std::unordered_map<dai::RawImgFrame::Type, std::string> encodingEnumMap = {
     {dai::RawImgFrame::Type::YUV422i, "yuv422"},
     {dai::RawImgFrame::Type::RGBA8888, "rgba8"},

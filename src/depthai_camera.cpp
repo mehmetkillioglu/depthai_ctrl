@@ -128,6 +128,7 @@ void DepthAICamera::VideoStreamCommand(std_msgs::msg::String::SharedPtr msg)
       bool useMonoCams = _useMonoCams;
       bool useRawColorCam = _useRawColorCam;
       bool useAutoFocus = _useAutoFocus;
+      
 
       if (!cmd["Width"].empty() && cmd["Width"].is_number_integer()) {
         nlohmann::from_json(cmd["Width"], width);
