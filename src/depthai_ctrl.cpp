@@ -1,5 +1,5 @@
 #include <memory>
-#include "depthai_ctrl/depthai_camera.h"
+#include "depthai_ctrl/depthai_camera.hpp"
 #include "depthai_ctrl/depthai_gstreamer.h"
 #include <rclcpp/rclcpp.hpp>
 

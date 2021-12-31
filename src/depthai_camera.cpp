@@ -1,4 +1,4 @@
-#include "depthai_ctrl/depthai_camera.h"
+#include "depthai_ctrl/depthai_camera.hpp"
 #include "depthai_ctrl/depthai_utils.h"
 #include <nlohmann/json.hpp>
 
@@ -382,7 +382,6 @@ void DepthAICamera::TryRestarting()
   RCLCPP_INFO(
     this->get_logger(), "[%s]: DepthAI Camera USB Speed: %s", get_name(),
     usbSpeed.c_str());
-
   //_device->startPipeline();
   _colorCamInputQueue = _device->getInputQueue("colorCamCtrl");
   dai::CameraControl colorCamCtrl;
@@ -395,44 +394,11 @@ void DepthAICamera::TryRestarting()
 
   _colorCamInputQueue->send(colorCamCtrl);
   //dai::rosBridge::ImageConverter rgbConverter(_color_camera_frame, false);
-  //auto _node_ptr = this->shared_from_this();
-  /*if (_useNeuralNetwork) {
-    _neuralNetworkOutputQueue = _device->getOutputQueue("detections", 30, false);
-    dai::rosBridge::ImgDetectionConverter detConverter(_color_camera_frame,
-      416, 416, false);
-    dai::rosBridge::BridgePublisher<vision_msgs::msg::Detection2DArray,
-      dai::ImgDetections> detectionPublish(_neuralNetworkOutputQueue,
-      shared_from_this(),
-      std::string("color/mobilenet_detections"),
-      std::bind(
-        static_cast<void (dai::rosBridge::ImgDetectionConverter::*)(
-          std::shared_ptr<dai::ImgDetections>,
-          vision_msgs::msg::Detection2DArray &)>(&dai::rosBridge::ImgDetectionConverter::toRosMsg),
-        &detConverter,
-        std::placeholders::_1,
-        std::placeholders::_2),
-      30);
-    if (_syncNN) {
-      dai::rosBridge::ImageConverter rgbPassConverter(_color_camera_frame, false);
-      _passthroughQueue =
-        _device->getOutputQueue("pass", 30, false);
-      dai::rosBridge::BridgePublisher<sensor_msgs::msg::Image, dai::ImgFrame> passThroughPublish(
-        _passthroughQueue,
-      shared_from_this(),
-        std::string("color/image"),
-        std::bind(
-          &dai::rosBridge::ImageConverter::toRosMsg,
-          &rgbPassConverter,
-          std::placeholders::_1,
-          std::placeholders::_2),
-        30,
-        rgbCameraInfo,
-        "color");
-    }*/
   if (_useNeuralNetwork) {
+    _neural_network_converter = std::make_shared<dai::rosBridge::ImgDetectionConverter>(
+      _color_camera_frame, _videoWidth, _videoHeight, false);
     _neuralNetworkOutputQueue = _device->getOutputQueue("detections", 30, false);
-
-    _neuralNetworkCallback =
+      _neuralNetworkCallback =
       _neuralNetworkOutputQueue->addCallback(
       std::bind(
         &DepthAICamera::onNeuralNetworkCallback, this,
@@ -448,6 +414,8 @@ void DepthAICamera::TryRestarting()
     }
   }
   if (_useRawColorCam) {
+    _color_camera_converter = std::make_shared<dai::rosBridge::ImageConverter>(
+      _color_camera_frame, false);
     _colorQueue = _device->getOutputQueue("color", 30, false);
     _colorCamCallback =
       _colorQueue->addCallback(
@@ -457,6 +425,11 @@ void DepthAICamera::TryRestarting()
   }
   _videoQueue = _device->getOutputQueue("enc26xColor", 30, true);
   if (_useMonoCams) {
+    _left_camera_converter = std::make_shared<dai::rosBridge::ImageConverter>(
+      _left_camera_frame, false);
+    _right_camera_converter = std::make_shared<dai::rosBridge::ImageConverter>(
+      _right_camera_frame,
+      false);
     _leftQueue = _device->getOutputQueue("left", 30, false);
     _rightQueue = _device->getOutputQueue("right", 30, false);
 
@@ -517,7 +490,7 @@ void DepthAICamera::onLeftCamCallback(
     this->get_logger(), "[%s]: Received %ld left camera frames...",
     get_name(), leftPtrVector.size());
   for (std::shared_ptr<dai::ImgFrame> & leftPtr : leftPtrVector) {
-    auto image = ConvertImage(leftPtr, _left_camera_frame);
+    auto image = _left_camera_converter->toRosMsgPtr(leftPtr);
     _left_publisher->publish(*image);
   }
 
@@ -533,7 +506,7 @@ void DepthAICamera::onRightCallback(
     this->get_logger(), "[%s]: Received %ld right camera frames...",
     get_name(), rightPtrVector.size());
   for (std::shared_ptr<dai::ImgFrame> & rightPtr : rightPtrVector) {
-    auto image = ConvertImage(rightPtr, _right_camera_frame);
+    auto image = _right_camera_converter->toRosMsgPtr(rightPtr);
     _right_publisher->publish(*image);
   }
 }
@@ -548,7 +521,7 @@ void DepthAICamera::onColorCamCallback(
     this->get_logger(), "[%s]: Received %ld color camera frames...",
     get_name(), colorPtrVector.size());
   for (std::shared_ptr<dai::ImgFrame> & colorPtr : colorPtrVector) {
-    auto image = ConvertImage(colorPtr, _color_camera_frame);
+    auto image = _color_camera_converter->toRosMsgPtr(colorPtr);
     _color_publisher->publish(*image);
   }
 }
@@ -563,7 +536,7 @@ void DepthAICamera::onPassthroughCallback(
     this->get_logger(), "[%s]: Received %ld color camera frames...",
     get_name(), colorPtrVector.size());
   for (std::shared_ptr<dai::ImgFrame> & colorPtr : colorPtrVector) {
-    auto image = ConvertImage(colorPtr, _color_camera_frame);
+    auto image = _passthrough_converter->toRosMsgPtr(colorPtr);
     _passthrough_publisher->publish(*image);
   }
 }
@@ -613,143 +586,13 @@ void DepthAICamera::onNeuralNetworkCallback(
   const std::shared_ptr<dai::ADatatype> data)
 {
   (void)data;
-  RCLCPP_INFO(
-    this->get_logger(), "[%s]: Received neural network data...",
-    get_name());
-
   std::vector<std::shared_ptr<dai::ImgDetections>> detectionsPtrVector =
     _neuralNetworkOutputQueue->tryGetAll<dai::ImgDetections>();
   for (std::shared_ptr<dai::ImgDetections> & detectionsPtr : detectionsPtrVector) {
-    vision_msgs::msg::Detection2DArray detection_array;
-    detection_array.detections.resize(detectionsPtr->detections.size());
-    detection_array.header.stamp = this->get_clock()->now();
-    detection_array.header.frame_id = _color_camera_frame;
-    for (unsigned long i = 0; i < detectionsPtr->detections.size(); ++i) {
-      detection_array.detections[i].header.frame_id = _color_camera_frame;
-      detection_array.detections[i].header.stamp = this->get_clock()->now();
-      detection_array.detections[i].id = labelMap[detectionsPtr->detections[i].label];
-      detection_array.detections[i].results.resize(1);
-      detection_array.detections[i].results[0].hypothesis.class_id = std::to_string(
-        detectionsPtr->detections[i].label);
-      detection_array.detections[i].results[0].hypothesis.score =
-        detectionsPtr->detections[i].confidence;
-
-      double xMin = detectionsPtr->detections[i].xmin * _videoWidth;
-      double yMin = detectionsPtr->detections[i].ymin * _videoHeight;
-      double xMax = detectionsPtr->detections[i].xmax * _videoWidth;
-      double yMax = detectionsPtr->detections[i].ymax * _videoHeight;
-
-      float xSize = xMax - xMin;
-      float ySize = yMax - yMin;
-      float xCenter = xMin + xSize / 2;
-      float yCenter = yMin + ySize / 2;
-
-      detection_array.detections[i].bbox.center.x = xCenter;
-      detection_array.detections[i].bbox.center.y = yCenter;
-      detection_array.detections[i].bbox.size_x = xSize;
-      detection_array.detections[i].bbox.size_y = ySize;
-      _detection_roi_publisher->publish(detection_array);
-
-      if (labelMap[detectionsPtr->detections[i].label] == "apple") {
-        double dx = ((detectionsPtr->detections[i].xmin + detectionsPtr->detections[i].xmax) / 2) -
-          0.5;
-        double dy = ((detectionsPtr->detections[i].ymin + detectionsPtr->detections[i].ymax) / 2) -
-          0.5;
-        RCLCPP_INFO(
-          this->get_logger(), "[%s]: Apple at (%f, %f), (%f, %f): (%f, %f)",
-          get_name(), detectionsPtr->detections[i].xmin, detectionsPtr->detections[i].ymin,
-          detectionsPtr->detections[i].xmax, detectionsPtr->detections[i].ymax, dx, dy);
-      }
-    }
+    auto detections = _neural_network_converter->toRosMsgPtr(detectionsPtr);
+    _detection_roi_publisher->publish(*detections);
   }
-}
-std::shared_ptr<DepthAICamera::ImageMsg> DepthAICamera::ConvertImage(
-  const std::shared_ptr<dai::ImgFrame> input,
-  const std::string & frame_id)
-{
-  auto message = std::make_shared<ImageMsg>();
-  const auto stamp = input->getTimestamp();
-  const int32_t sec = duration_cast<seconds>(stamp.time_since_epoch()).count();
-  const int32_t nsec = duration_cast<nanoseconds>(stamp.time_since_epoch()).count() % 1000000000UL;
-
-  message->header.stamp = rclcpp::Time(sec, nsec, RCL_STEADY_TIME);
-  message->header.frame_id = frame_id;
-
-
-  if (planarEncodingEnumMap.find(input->getType()) != planarEncodingEnumMap.end()) {
-    // cv::Mat inImg = input->getCvFrame();
-    cv::Mat mat, output;
-    cv::Size size = {0, 0};
-    int type = 0;
-    switch (input->getType()) {
-      case dai::RawImgFrame::Type::BGR888p:
-      case dai::RawImgFrame::Type::RGB888p:
-        size = cv::Size(input->getWidth(), input->getHeight());
-        type = CV_8UC3;
-        break;
-      case dai::RawImgFrame::Type::YUV420p:
-      case dai::RawImgFrame::Type::NV12:
-        size = cv::Size(input->getWidth(), input->getHeight() * 3 / 2);
-        type = CV_8UC1;
-        break;
-
-      default:
-        std::runtime_error("Invalid dataType inputs..");
-        break;
-    }
-    mat = cv::Mat(size, type, input->getData().data());
-
-    switch (input->getType()) {
-      case dai::RawImgFrame::Type::RGB888p: {
-          cv::Size s(input->getWidth(), input->getHeight());
-          std::vector<cv::Mat> channels;
-          // RGB
-          channels.push_back(cv::Mat(s, CV_8UC1, input->getData().data() + s.area() * 2));
-          channels.push_back(cv::Mat(s, CV_8UC1, input->getData().data() + s.area() * 1));
-          channels.push_back(cv::Mat(s, CV_8UC1, input->getData().data() + s.area() * 0));
-          cv::merge(channels, output);
-        } break;
-
-      case dai::RawImgFrame::Type::BGR888p: {
-          cv::Size s(input->getWidth(), input->getHeight());
-          std::vector<cv::Mat> channels;
-          // BGR
-          channels.push_back(cv::Mat(s, CV_8UC1, input->getData().data() + s.area() * 0));
-          channels.push_back(cv::Mat(s, CV_8UC1, input->getData().data() + s.area() * 1));
-          channels.push_back(cv::Mat(s, CV_8UC1, input->getData().data() + s.area() * 2));
-          cv::merge(channels, output);
-        } break;
-
-      case dai::RawImgFrame::Type::YUV420p:
-        cv::cvtColor(mat, output, cv::ColorConversionCodes::COLOR_YUV2BGR_IYUV);
-        break;
-
-      case dai::RawImgFrame::Type::NV12:
-        cv::cvtColor(mat, output, cv::ColorConversionCodes::COLOR_YUV2BGR_NV12);
-        break;
-
-      default:
-        output = mat.clone();
-        break;
-    }
-
-    cv_bridge::CvImage(message->header, sensor_msgs::image_encodings::BGR8, output).toImageMsg(
-      *message);
-  } else if (encodingEnumMap.find(input->getType()) != encodingEnumMap.end()) {
-    message->encoding = encodingEnumMap[input->getType()];
-    if (message->encoding == "16UC1") {
-      message->is_bigendian = false;
-    } else {
-      message->is_bigendian = true;
-    }
-    message->height = input->getHeight();
-    message->width = input->getWidth();
-    message->step = input->getData().size() / input->getHeight();
-    message->data.swap(input->getData());
-  }
-
-  return message;
-}
+} 
 
 #include <rclcpp_components/register_node_macro.hpp>
 RCLCPP_COMPONENTS_REGISTER_NODE(depthai_ctrl::DepthAICamera)
