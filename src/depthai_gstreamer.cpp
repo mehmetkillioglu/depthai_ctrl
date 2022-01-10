@@ -43,9 +43,6 @@ DepthAIGStreamer::~DepthAIGStreamer()
 
 void DepthAIGStreamer::Initialize()
 {
-  declare_parameter<std::string>("video_stream_topic", "camera_node/color/video");
-
-  const std::string video_stream_topic = get_parameter("video_stream_topic").as_string();
 
   _callback_group_timer = this->create_callback_group(
     rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -64,7 +61,7 @@ void DepthAIGStreamer::Initialize()
 
   rclcpp::QoS qos_profile(10);
   _video_subscriber = create_subscription<CompressedImageMsg>(
-    video_stream_topic,
+    "camera_node/color/video",
     qos_profile,
     std::bind(&DepthAIGStreamer::GrabVideoMsg, this, std::placeholders::_1), video_sub_opt);
 
