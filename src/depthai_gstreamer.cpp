@@ -43,7 +43,7 @@ DepthAIGStreamer::~DepthAIGStreamer()
 
 void DepthAIGStreamer::Initialize()
 {
-  declare_parameter<std::string>("video_stream_topic", "camera/color/video");
+  declare_parameter<std::string>("video_stream_topic", "camera_node/color/video");
 
   const std::string video_stream_topic = get_parameter("video_stream_topic").as_string();
 

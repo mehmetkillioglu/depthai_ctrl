@@ -45,7 +45,7 @@ public:
   using CompressedImageMsg = sensor_msgs::msg::CompressedImage;
   using Ptr = std::shared_ptr<depthai_ctrl::DepthAICamera>;
   DepthAICamera()
-  : Node("depthai_camera"),
+  : Node("camera_node"),
     _videoWidth(1280),
     _videoHeight(720),
     _videoFps(25),
@@ -76,7 +76,7 @@ public:
   }
 
   DepthAICamera(const rclcpp::NodeOptions & options)
-  : Node("depthai_camera", options),
+  : Node("camera_node", options),
     _videoWidth(1280),
     _videoHeight(720),
     _videoFps(25),
