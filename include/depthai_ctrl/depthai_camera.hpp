@@ -64,6 +64,7 @@ public:
     _right_camera_frame("right_camera_frame"),
     _color_camera_frame("color_camera_frame"),
     _nn_directory("tiny-yolo-v4_openvino_2021.2_6shave.blob"),
+    _cameraName("oak"),
     _leftCamCallback(0),
     _rightCamCallback(0),
     _colorCamCallback(0),

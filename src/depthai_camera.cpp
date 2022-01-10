@@ -28,37 +28,38 @@ static const std::vector<std::string> labelMap = {
 void DepthAICamera::Initialize()
 {
   RCLCPP_INFO(get_logger(), "[%s]: Initializing...", get_name());
-  declare_parameter<std::string>("left_camera_topic", "camera/left/image_raw");
+  /*declare_parameter<std::string>("left_camera_topic", "camera/left/image_raw");
   declare_parameter<std::string>("right_camera_topic", "camera/right/image_raw");
   declare_parameter<std::string>("color_camera_topic", "camera/color/image_raw");
   declare_parameter<std::string>("video_stream_topic", "camera/color/video");
   declare_parameter<std::string>("passthrough_topic", "camera/color/image_passthrough");
   declare_parameter<std::string>("stream_control_topic", "videostreamcmd");
-  declare_parameter<std::string>("detection_roi_topic", "detections");
+  declare_parameter<std::string>("detection_roi_topic", "detections");*/
   declare_parameter<std::string>("nn_directory", "tiny-yolo-v4_openvino_2021.2_6shave.blob");
   declare_parameter<std::string>("camera_name", "oak");
 
-
-  const std::string left_camera_topic = get_parameter("left_camera_topic").as_string();
+  /*const std::string left_camera_topic = get_parameter("left_camera_topic").as_string();
   const std::string right_camera_topic = get_parameter("right_camera_topic").as_string();
   const std::string color_camera_topic = get_parameter("color_camera_topic").as_string();
   const std::string video_stream_topic = get_parameter("video_stream_topic").as_string();
   const std::string passthrough_topic = get_parameter("passthrough_topic").as_string();
   const std::string detection_roi_topic = get_parameter("detection_roi_topic").as_string();
-  const std::string stream_control_topic = get_parameter("stream_control_topic").as_string();
+  const std::string stream_control_topic = get_parameter("stream_control_topic").as_string();*/
   _nn_directory = get_parameter("nn_directory").as_string();
 
-  _left_publisher = create_publisher<ImageMsg>(left_camera_topic, 10);
-  _right_publisher = create_publisher<ImageMsg>(right_camera_topic, 10);
-  _color_publisher = create_publisher<ImageMsg>(color_camera_topic, 10);
-  _passthrough_publisher = create_publisher<ImageMsg>(passthrough_topic, 10);
+  _left_publisher = create_publisher<ImageMsg>("~/left/image_raw", 10);
+  _right_publisher = create_publisher<ImageMsg>("~/right/image_raw", 10);
+  _color_publisher = create_publisher<ImageMsg>("~/color/image_raw", 10);
+  _passthrough_publisher = create_publisher<ImageMsg>("~/color/image_passthrough", 10);
+
   _detection_roi_publisher = create_publisher<vision_msgs::msg::Detection2DArray>(
-    detection_roi_topic, 1);
+    "~/detections", 10);
+
   _video_publisher = create_publisher<CompressedImageMsg>(
-    video_stream_topic,
-    rclcpp::SystemDefaultsQoS());
+    "~/color/video", 10);
+
   _stream_command_subscriber = create_subscription<std_msgs::msg::String>(
-    stream_control_topic, rclcpp::SystemDefaultsQoS(),
+    "~/videostreamcmd", 10,
     std::bind(&DepthAICamera::VideoStreamCommand, this, _1));
 
   // Video Stream parameters
@@ -88,6 +89,11 @@ void DepthAICamera::Initialize()
   _useAutoFocus = get_parameter("use_auto_focus").as_bool();
   _useNeuralNetwork = get_parameter("use_neural_network").as_bool();
   _syncNN = get_parameter("use_passthrough_preview").as_bool();
+  _cameraName = get_parameter("camera_name").as_string();
+  _left_camera_frame = _cameraName + "_left_camera_optical_frame";
+  _right_camera_frame = _cameraName + "_right_camera_optical_frame";
+  _color_camera_frame = _cameraName + "_rgb_camera_optical_frame";
+
   if (_useNeuralNetwork) {
     RCLCPP_INFO(
       get_logger(), "[%s]: Using neural network, blob path %s",
@@ -128,7 +134,7 @@ void DepthAICamera::VideoStreamCommand(std_msgs::msg::String::SharedPtr msg)
       bool useMonoCams = _useMonoCams;
       bool useRawColorCam = _useRawColorCam;
       bool useAutoFocus = _useAutoFocus;
-      
+
 
       if (!cmd["Width"].empty() && cmd["Width"].is_number_integer()) {
         nlohmann::from_json(cmd["Width"], width);
@@ -399,7 +405,7 @@ void DepthAICamera::TryRestarting()
     _neural_network_converter = std::make_shared<dai::rosBridge::ImgDetectionConverter>(
       _color_camera_frame, _videoWidth, _videoHeight, false);
     _neuralNetworkOutputQueue = _device->getOutputQueue("detections", 30, false);
-      _neuralNetworkCallback =
+    _neuralNetworkCallback =
       _neuralNetworkOutputQueue->addCallback(
       std::bind(
         &DepthAICamera::onNeuralNetworkCallback, this,
@@ -593,7 +599,7 @@ void DepthAICamera::onNeuralNetworkCallback(
     auto detections = _neural_network_converter->toRosMsgPtr(detectionsPtr);
     _detection_roi_publisher->publish(*detections);
   }
-} 
+}
 
 #include <rclcpp_components/register_node_macro.hpp>
 RCLCPP_COMPONENTS_REGISTER_NODE(depthai_ctrl::DepthAICamera)

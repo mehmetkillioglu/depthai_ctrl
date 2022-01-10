@@ -62,14 +62,15 @@ void DepthAIGStreamer::Initialize()
   auto cmd_sub_opt = rclcpp::SubscriptionOptions();
   cmd_sub_opt.callback_group = _callback_group_cmd_subscriber;
 
+  rclcpp::QoS qos_profile(10);
   _video_subscriber = create_subscription<CompressedImageMsg>(
     video_stream_topic,
-    rclcpp::SystemDefaultsQoS(),
+    qos_profile,
     std::bind(&DepthAIGStreamer::GrabVideoMsg, this, std::placeholders::_1), video_sub_opt);
 
   _stream_command_subscriber = this->create_subscription<std_msgs::msg::String>(
     "videostreamcmd",
-    rclcpp::SystemDefaultsQoS(),
+    qos_profile,
     std::bind(&DepthAIGStreamer::VideoStreamCommand, this, std::placeholders::_1), cmd_sub_opt);
 
   _handle_stream_status_timer = this->create_wall_timer(

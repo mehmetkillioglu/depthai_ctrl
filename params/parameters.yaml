@@ -1,0 +1,25 @@
+$(var my_node_ns)/camera_node:
+  ros__parameters:
+    bitrate: 3000000
+    camera_name: oak
+    encoding: H264
+    fps: 25
+    height: 720
+    lens_position: 120
+    nn_directory: tiny-yolo-v4_openvino_2021.2_6shave.blob
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1000
+          durability: volatile
+          history: keep_last
+          reliability: reliable
+    use_auto_focus: true
+    use_mono_cams: true
+    use_neural_network: false
+    use_passthrough_preview: false
+    use_raw_color_cam: true
+    use_sim_time: false
+    use_usb_three: true
+    use_video_from_color_cam: true
+    width: 1280
