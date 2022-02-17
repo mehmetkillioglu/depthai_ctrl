@@ -148,7 +148,7 @@ if (BUILD_TESTING)
   add_test(depthai_gstreamer_test depthai_gstreamer_test)
 endif (BUILD_TESTING)
 
-install(TARGETS depthai_camera depthai_gstreamer gstreamer_interface
+install(TARGETS depthai_camera depthai_gstreamer gstreamer_interface depthai_bridge depthai-core
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)

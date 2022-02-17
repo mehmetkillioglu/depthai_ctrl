@@ -104,7 +104,7 @@ def generate_launch_description():
 
     declare_use_raw_color_cam_cmd = DeclareLaunchArgument(
         'use_raw_color_cam',
-        default_value='false',
+        default_value='true',
         description='The raw color camera of the camera.')
 
     declare_use_video_from_color_cam_cmd = DeclareLaunchArgument(
@@ -114,22 +114,22 @@ def generate_launch_description():
 
     declare_use_auto_focus_cmd = DeclareLaunchArgument(
         'use_auto_focus',
-        default_value='false',
+        default_value='true',
         description='The auto focus of the camera.')
 
     declare_use_usb_three_cmd = DeclareLaunchArgument(
         'use_usb_three',
-        default_value='false',
+        default_value='true',
         description='The usb three of the camera.')
 
     declare_use_neural_network_cmd = DeclareLaunchArgument(
         'use_neural_network',
-        default_value='false',
+        default_value='true',
         description='The neural network of the camera.')
 
     declare_use_passthrough_preview_cmd = DeclareLaunchArgument(
         'use_passthrough_preview',
-        default_value='false',
+        default_value='true',
         description='The passthrough preview of the camera.')
 
     set_namespace_cmd = SetLaunchConfiguration('my_node_ns', DRONE_DEVICE_ID)

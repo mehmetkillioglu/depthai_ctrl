@@ -93,6 +93,25 @@ void DepthAICamera::Initialize()
   _left_camera_frame = _cameraName + "_left_camera_optical_frame";
   _right_camera_frame = _cameraName + "_right_camera_optical_frame";
   _color_camera_frame = _cameraName + "_rgb_camera_optical_frame";
+  
+  RCLCPP_INFO(get_logger(), "[%s]: Initialization complete.", get_name());
+  RCLCPP_INFO(get_logger(), "[%s]: Video stream parameters:", get_name());
+  RCLCPP_INFO(get_logger(), "[%s]:   Width: %d", get_name(), _videoWidth);
+  RCLCPP_INFO(get_logger(), "[%s]:   Height: %d", get_name(), _videoHeight);
+  RCLCPP_INFO(get_logger(), "[%s]:   FPS: %d", get_name(), _videoFps);
+  RCLCPP_INFO(get_logger(), "[%s]:   Bitrate: %d", get_name(), _videoBitrate);
+  RCLCPP_INFO(get_logger(), "[%s]:   Lens position: %d", get_name(), _videoLensPosition);
+  RCLCPP_INFO(get_logger(), "[%s]:   H265: %s", get_name(), _videoH265 ? "true" : "false");
+  RCLCPP_INFO(get_logger(), "[%s]:   Use mono cams: %s", get_name(), _useMonoCams ? "true" : "false");
+  RCLCPP_INFO(get_logger(), "[%s]:   Use raw color cam: %s", get_name(), _useRawColorCam ? "true" : "false");
+  RCLCPP_INFO(get_logger(), "[%s]:   Use video from color cam: %s", get_name(), _useVideoFromColorCam ? "true" : "false");
+  RCLCPP_INFO(get_logger(), "[%s]:   Use auto focus: %s", get_name(), _useAutoFocus ? "true" : "false");
+  RCLCPP_INFO(get_logger(), "[%s]:   Use neural network: %s", get_name(), _useNeuralNetwork ? "true" : "false");
+  RCLCPP_INFO(get_logger(), "[%s]:   Use passthrough preview: %s", get_name(), _syncNN ? "true" : "false");
+  RCLCPP_INFO(get_logger(), "[%s]:   Camera name: %s", get_name(), _cameraName.c_str());
+  RCLCPP_INFO(get_logger(), "[%s]:   Left camera frame: %s", get_name(), _left_camera_frame.c_str());
+  RCLCPP_INFO(get_logger(), "[%s]:   Right camera frame: %s", get_name(), _right_camera_frame.c_str());
+  RCLCPP_INFO(get_logger(), "[%s]:   Color camera frame: %s", get_name(), _color_camera_frame.c_str());
 
   if (_useNeuralNetwork) {
     RCLCPP_INFO(
@@ -411,6 +430,8 @@ void DepthAICamera::TryRestarting()
         &DepthAICamera::onNeuralNetworkCallback, this,
         std::placeholders::_1));
     if (_syncNN) {
+      _passthrough_converter = std::make_shared<dai::rosBridge::ImageConverter>(
+      _color_camera_frame, false);
       _passthroughQueue =
         _device->getOutputQueue("pass", 30, false);
       _passthroughCallback =
